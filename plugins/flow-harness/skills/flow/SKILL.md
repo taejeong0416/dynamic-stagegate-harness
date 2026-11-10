@@ -9,9 +9,10 @@ description: .flow/config.toml이 있는 프로젝트에서 작업을 상태 기
 
 ## 작업 시작
 
-1. `python -X utf8 .flow/flow.py status`로 진행 중인 계획과 할 일을 본다. SessionStart와 UserPromptSubmit hook이 같은 내용을 넣어 준다.
-2. 새 작업은 종류를 골라 시작한다. `python -X utf8 .flow/flow.py start --kind <종류> --title "<제목>"`. 앞 계획에서 이어지면 `--from P###`.
-3. 출력된 할 일대로 계획 파일을 채운다. 절 제목과 bullet 항목은 틀 그대로 두고 지우지 않는다.
+1. `python -X utf8 .flow/flow.py status`로 진행 중인 계획과 할 일을 본다. SessionStart hook이 같은 내용을 넣고, 메시지마다 계획 목록이 한 줄씩 들어온다.
+2. 흐름과 관계없는 질문, 조사, 문서 초안 같은 부가 작업은 계획 없이 바로 한다. 하네스는 코드 편집과 계획 상태 진행에만 걸린다.
+3. 새 작업은 종류를 골라 시작한다. `python -X utf8 .flow/flow.py start --kind <종류> --title "<제목>"`. 앞 계획에서 이어지면 `--from P###`.
+4. 출력된 할 일대로 계획 파일을 채운다. 절 제목과 bullet 항목은 틀 그대로 두고 지우지 않는다.
 
 ## 상태 진행
 

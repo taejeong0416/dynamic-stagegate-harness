@@ -309,7 +309,10 @@ def result_status(paths, since):
 # 서버 실행 감지
 
 CMD_AT = r"(?:^|[;&|(]\s*|\b(?:timeout\s+\S+|nohup|setsid)\s+)"
-LAUNCH = re.compile(CMD_AT + r"ssh\b[^\n]*(\s-[a-zA-Z]*f[a-zA-Z]*\b|\bnohup\b|\btmux\b|\bscreen\b|\bsetsid\b)", re.M)
+# 작업을 띄우는 경우만 센다. ssh 자체의 -f(원격 명령 따옴표 앞), nohup, setsid, tmux new/send-keys, screen -d.
+# tmux ls, tail -f 같은 확인 명령은 세지 않는다
+LAUNCH = re.compile(CMD_AT + r"ssh\b(?:[^\n\"']*?\s-[a-zA-Z]*f[a-zA-Z]*\b|[^\n]*?(?:\bnohup\b|\bsetsid\b"
+                    r"|\btmux\s+(?:-\S+\s+)*(?:new|new-session|send-keys|send)\b|\bscreen\s+-\S*d))", re.M)
 UPLOAD = re.compile(CMD_AT + r"(scp|rsync)\b", re.M)
 
 
