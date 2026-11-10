@@ -36,8 +36,10 @@
 | 표 | 키 |
 |---|---|
 | `[kinds.<종류>]` | states(상태 순서), options(start --with로 켤 수 있는 선택), when(상태별 들를 조건), extra_sections(상태가 쓰지 않아도 틀에 넣을 절) |
-| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), run(true면 gate run을 받는다), review(검토자 지시문) |
+| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델) |
 | `[sections."<절>"]` | body(계획 틀에 들어갈 표나 bullet) |
+
+checks의 검사와 review_when에는 `only = [종류]`나 `skip = [종류]`를 붙여 적용할 종류를 고른다.
 
 when의 조건 키는 option(켠 선택), changed(계획 시작 뒤 바뀐 파일 패턴), max_files(계획의 코드 파일 수 상한), not, any다. 예를 들어 `MIGRATE = {changed = ["migrations/*"]}`는 migrations/가 바뀐 계획만 MIGRATE에 들르게 한다.
 
