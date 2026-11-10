@@ -4,7 +4,8 @@
 
 Claude Code 에이전트의 작업을 관문이 있는 상태 기계로 진행시키고, 진행 기록을 근거로 그 관문 구조를 고쳐 가는 하네스 플러그인이다.
 
-![version](https://img.shields.io/badge/version-0.2.0-555)
+![version](https://img.shields.io/badge/version-0.3.0-555)
+![license](https://img.shields.io/badge/license-MIT-555)
 ![python](https://img.shields.io/badge/python-3.11%2B-555)
 ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-555)
 
@@ -181,6 +182,10 @@ plugins/dynamic-stagegate-harness/
 - stop hook은 이 세션이 편집 도구로 고친 파일만 본다. 셸 명령이나 스크립트로 고친 파일은 pre-commit과 `clean` 검사가 잡는다.
 - 숫자 검사는 .py만 tokenize로 정확히 보고, 다른 언어는 문자열과 주석을 지운 뒤 정규식으로 본다.
 - 진단 수치는 판단 자료이고, 상태를 빼거나 더할지는 에이전트의 제안과 사용자 승인으로 정한다.
+
+## 라이선스
+
+MIT 라이선스로 배포한다. 전문은 LICENSE 파일에 있다.
 
 ## 참고 자료
 
