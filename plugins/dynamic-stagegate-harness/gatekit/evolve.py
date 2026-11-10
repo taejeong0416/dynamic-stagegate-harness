@@ -128,6 +128,35 @@ def describe(cfg):
     return "\n".join(lines)
 
 
+def mermaid(cfg):
+    """종류마다 상태 경로를 Mermaid 상태 다이어그램으로. 조건이 붙은 상태는 건너뛰는 화살표를 같이 그린다"""
+    out = []
+    for kname, k in cfg["kinds"].items():
+        states, when = k["states"], k.get("when", {})
+        lines = ["stateDiagram-v2", "    direction LR"]
+        for s in states:
+            st = cfg["states"].get(s, {})
+            tags = [t for t, on in (("코드", st.get("code")), ("실행", st.get("run")), ("검토", st.get("review"))) if on]
+            if tags:
+                lines.append(f'    state "{s}<br>{", ".join(tags)}" as {s}')
+        for i in range(len(states) + 1):
+            src = states[i - 1] if i else "[*]"
+            skipped = []
+            for dst in states[i:] + ["[*]"]:
+                if skipped:
+                    label = f" : {', '.join(skipped)} 건너뜀"
+                elif dst in when:
+                    label = " : " + re.sub(r"[\[\]'\"]", "", fmt_cond(when[dst]))
+                else:
+                    label = ""
+                lines.append(f"    {src} --> {dst}{label}")
+                if dst not in when:
+                    break
+                skipped.append(dst)
+        out += [f"### {kname}", "", "```mermaid", *lines, "```", ""]
+    return "\n".join(out)
+
+
 def fmt_cond(c):
     parts = []
     for k, v in c.items():
@@ -304,7 +333,8 @@ def check_proposal(flow, hid, allow_review):
                                         "새 구조"))
     diag = PROPOSALS / f"{hid}.diag.md"
     diag.write_text("\n".join([diagnose(flow), "", "## lint", "", *(problems or ["문제 없음"]), "", "## 지난 계획 재생", "",
-                               *replay(flow, new), "", "## 새 구조 경로", "", describe(new), "", "## diff", "",
+                               *replay(flow, new), "", "## 새 구조 경로", "", describe(new), "", mermaid(new),
+                               "## diff", "",
                                "```diff", diff, "```", ""]), encoding="utf-8")
     if miss:
         return miss

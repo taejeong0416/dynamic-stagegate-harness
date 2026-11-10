@@ -250,7 +250,7 @@ def cmd_lint(a, flow):
 
 
 def cmd_describe(a, flow):
-    print(evolve.describe(CFG))
+    print(evolve.mermaid(CFG) if a.mermaid else evolve.describe(CFG))
 
 
 def cmd_diagnose(a, flow):
@@ -316,7 +316,8 @@ def main(argv=None):
     cm.add_argument("path")
     li = sub.add_parser("lint")
     li.add_argument("--file")
-    sub.add_parser("describe")
+    de = sub.add_parser("describe")
+    de.add_argument("--mermaid", action="store_true", help="종류마다 상태 경로를 Mermaid 다이어그램으로 출력")
     sub.add_parser("diagnose")
     cp = sub.add_parser("check-proposal")
     cp.add_argument("hid")
