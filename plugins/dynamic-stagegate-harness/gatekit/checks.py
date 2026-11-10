@@ -196,7 +196,7 @@ def paths_exist(ctx, spec):
 def reviewed(ctx, spec):
     """state에서 받은 검토 뒤 계획 내용이 바뀌지 않았다"""
     rev = ctx["p"].get("review", {}).get(spec["state"])
-    if not rev or not rev["pass"] or rev["hash"] != plan_hash(ctx["text"]):
+    if not rev or not rev["pass"] or rev["hash"] != plan_hash(ctx["text"], ctx["cfg"]):
         return [f"{spec['state']}에서 검토한 계획 내용이 바뀌었다. back으로 {spec['state']}에 돌아가 다시 검토를 받는다"]
     return []
 
@@ -230,14 +230,14 @@ REVIEW_SCHEMA = json.dumps({"type": "object", "properties": {
 def review_check(ctx, st):
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
     rev = p.get("review", {}).get(state)
-    if rev and rev["hash"] == plan_hash(text) and rev["pass"]:
+    if rev and rev["hash"] == plan_hash(text, ctx["cfg"]) and rev["pass"]:
         return []
     model = st.get("review_model") or CFG["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
     prompt = st["review"].format(plan=p["plan"], title=p["title"], kind=p["kind"], state=state)
     result, meta = call_reviewer(prompt, model)
-    p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text),
+    p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta}
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 

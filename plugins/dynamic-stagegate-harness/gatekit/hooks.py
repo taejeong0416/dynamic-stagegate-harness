@@ -26,6 +26,8 @@ READ_SEG = re.compile(r"^\s*(cat|type|head|tail|ls|dir|wc|grep|rg|findstr|Get-Co
 STATE_TOUCH = re.compile(r"\.gate/state\.json|\.gate/gate\.py|import\s+gatekit|from\s+gatekit|gate\.lock")
 HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"
                       r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
+# 커밋 메시지 인자. 메시지 속 단어를 -n으로 잘못 읽지 않게 검사 전에 뺀다
+MSG_ARG = re.compile(r"(\s(?:-[a-zA-Z]*m|--message)(?:\s+|=))(?:\"[^\"]*\"|'[^']*')")
 ADOPT = re.compile(r"\badopt\s+(\S+)\s+--approved\s+(?:\"([^\"]*)\"|'([^']*)')")
 SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item)"
                          r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
@@ -72,6 +74,9 @@ def guard(inp):
         path = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT) or ""
         if path == state_rel or path.startswith(".git/"):
             deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다.")
+        if path.startswith(".githooks/"):
+            deny(f"{path}는 설치 스크립트가 쓰는 git hook이라 직접 고치지 않는다. 커밋 전에 돌릴 명령은 제안서로 "
+                 "[project] pre_commit에 넣고, hook 자체를 바꿔야 하면 사용자에게 알린다.")
         if is_protected(path):
             deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .gate/proposals/H###.md에 제안서를 쓰고 "
                  "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(evolve skill).")
@@ -82,7 +87,7 @@ def guard(inp):
     if tool not in ("Bash", "PowerShell"):
         return
     cmd = ti.get("command", "").replace("\\", "/")
-    if HOOK_OFF.search(cmd):
+    if HOOK_OFF.search(MSG_ARG.sub(r"\1", cmd)):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
     if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
         deny("상태는 python -X utf8 .gate/gate.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")

@@ -31,7 +31,7 @@ DEFAULTS = {
     "harness": [".gate/gatekit/", ".gate/gate.py", ".gate/config.toml", ".gate/history/", ".gate/library/",
                 ".gate/GATE.md", ".githooks/"],
     # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 gate adopt로만 바꾼다
-    "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py"],
+    "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py", ".githooks/"],
     "harness_prefix": "harness:",
     "max_visits": 3,
     "files_section": "변경 파일",
@@ -311,11 +311,11 @@ def structure_problems(p, text):
     return miss
 
 
-def plan_hash(text):
-    """검토한 내용의 해시. 검토 뒤에 채우는 절(unreviewed)을 뺀다"""
+def plan_hash(text, cfg):
+    """검토한 내용의 해시. 검토 뒤에 채우는 절(계획이 쓰는 구조 버전의 unreviewed)을 뺀다"""
     parts = [text.split("\n## ")[0]]
     for name, lines in sections(text).items():
-        if name not in P["unreviewed"]:
+        if name not in cfg["project"]["unreviewed"]:
             parts.append(name + "\n" + "\n".join(lines))
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
