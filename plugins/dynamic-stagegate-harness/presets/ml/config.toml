@@ -53,18 +53,23 @@ kinds = ["repro", "infra"]
 
 [kinds.new]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+back = {RUN = ["IMPLEMENT", "PLAN"]}
 
 [kinds.model]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+back = {RUN = ["IMPLEMENT", "PLAN"]}
 
 [kinds.tune]
 states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+back = {RUN = ["IMPLEMENT", "PLAN"]}
 
 [kinds.freeze]
 states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+back = {RUN = ["IMPLEMENT", "PLAN"]}
 
 [kinds.repro]
 states = ["PLAN", "RUN", "RECORD"]
+back = {RUN = ["PLAN"]}
 
 [kinds.eda]
 states = ["QUESTION", "MEASURE", "RECORD", "REPLAN"]
@@ -285,6 +290,8 @@ todo = [
 ]
 checks = [
   {check = "filled", section = "결정", items = ["고른 갈래", "status.md 영향"]},
+  {check = "unchanged", state = "PLAN", sections = ["비교 기준", "결과별 다음 행동"], skip = ["eda"]},
+  {check = "unchanged", state = "QUESTION", sections = ["결과별 다음 행동"], only = ["eda"]},
   {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖"},
   {check = "commit_since", path = "progress/status.md", mention = true},
 ]

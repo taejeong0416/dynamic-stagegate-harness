@@ -320,6 +320,18 @@ def plan_hash(text, cfg):
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+def snapshot(s):
+    """절마다, bullet 항목마다 내용 해시. 상태를 넘길 때 남겨 두고 뒤 상태에서 바뀌었는지 본다"""
+    def h(text):
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    out = {}
+    for name, lines in s.items():
+        out[name] = h("\n".join(l.rstrip() for l in body(lines)))
+        for k, v in bullets(lines).items():
+            out[f"{name}: {k}"] = h(v)
+    return out
+
+
 def plan_text(p):
     return (ROOT / p["plan"]).read_text(encoding="utf-8")
 

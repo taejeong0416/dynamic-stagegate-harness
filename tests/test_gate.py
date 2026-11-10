@@ -129,6 +129,16 @@ class LintTest(Repo):
         r = self.gate("lint", "--file", "bad.toml")
         self.assertIn("protected에서 .gate/gatekit/를 뺄 수 없다", r.stdout)
 
+    def test_back과_unchanged는_앞_상태만_가리킨다(self):
+        self.setup_harness()
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        text = text.replace('back = {VERIFY = ["FIX", "REPRO"]}', 'back = {FIX = ["VERIFY"]}')
+        text = text.replace('{check = "unchanged", state = "REPRO",', '{check = "unchanged", state = "VERIFY",')
+        self.write("bad.toml", text)
+        r = self.gate("lint", "--file", "bad.toml")
+        self.assertIn("bugfix.back.FIX: VERIFY가 FIX보다 앞 상태가 아니다", r.stdout)
+        self.assertIn("bugfix/FIX: unchanged가 가리키는 VERIFY가 이 종류에서 FIX보다 앞 상태가 아니다", r.stdout)
+
 
 class FlowTest(Repo):
     def setUp(self):
@@ -201,6 +211,42 @@ class FlowTest(Repo):
         self.assertEqual(self.gate("next", "P001").returncode, 0)
         r = self.gate("back", "P001", "IMPLEMENT", "--why", "w")
         self.assertIn("3번 들어왔다", r.stderr)
+
+    def bugfix_to_fix(self):
+        """bugfix 계획을 REPRO에서 넘겨 FIX에 두고, 고친 코드까지 커밋한다"""
+        self.gate("start", "--kind", "bugfix", "--title", "b")
+        self.edit("plans/P001.md", ("- 증상:", "- 증상: 표시가 없다"),
+                  ("- 재현 명령:", "- 재현 명령: git grep -q FIXED -- src/a.py"),
+                  ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 표시를 더함 |"))
+        self.write("src/a.py", "a = 2\n")
+        self.git("add", "src/a.py", "plans")
+        self.assertEqual(self.git("commit", "-qm", "test: 재현").returncode, 0)
+        self.assertIn("P001 b: FIX", self.gate("next", "P001").stdout)
+        self.write("src/a.py", "a = 2  # FIXED\n")
+        self.edit("plans/P001.md", ("## 원인\n", "## 원인\n\n표시가 빠져 있었다.\n"))
+        self.git("add", "src/a.py", "plans")
+        self.assertEqual(self.git("commit", "-qm", "fix: 표시").returncode, 0)
+
+    def test_넘긴_뒤_재현_명령을_바꾸면_막는다(self):
+        self.bugfix_to_fix()
+        self.edit("plans/P001.md", ("git grep -q FIXED -- src/a.py", "git status"))
+        r = self.gate("next", "P001")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("REPRO를 넘긴 뒤 '재현: 재현 명령'이 바뀌었다", r.stdout)
+        self.edit("plans/P001.md", ("- 재현 명령: git status", "- 재현 명령: git grep -q FIXED -- src/a.py"))
+        self.assertIn("P001 b: VERIFY", self.gate("next", "P001").stdout)
+
+    def test_back은_적어_둔_경로로만_가고_진단에_경로별로_남는다(self):
+        self.edit(".gate/config.toml", ('back = {VERIFY = ["FIX", "REPRO"]}', 'back = {VERIFY = ["FIX"]}'))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: back 경로").returncode, 0)
+        self.assertIn("VERIFY --> FIX : back", self.gate("describe", "--mermaid").stdout)
+        self.bugfix_to_fix()
+        self.assertEqual(self.gate("next", "P001").returncode, 0)
+        r = self.gate("back", "P001", "REPRO", "--why", "w")
+        self.assertIn("VERIFY에서는 FIX로만 돌아갈 수 있다", r.stderr)
+        self.assertEqual(self.gate("back", "P001", "FIX", "--why", "덜 고침").returncode, 0)
+        self.assertIn("| bugfix | VERIFY | FIX | 1 | 덜 고침 |", self.gate("diagnose").stdout)
 
 
 class GuardTest(Repo):

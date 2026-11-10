@@ -9,7 +9,8 @@ from pathlib import Path
 from . import evolve
 from .checks import run_checks
 from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, git, head, is_code, is_harness, load, next_state, now,
-                   parse_config, plan_files, plan_text, save, sections, state_def, structure_problems, template_text)
+                   parse_config, plan_files, plan_text, save, sections, snapshot, state_def, structure_problems,
+                   template_text)
 
 CLI = "python -X utf8 .gate/gate.py"
 
@@ -108,6 +109,7 @@ def cmd_next(a, flow):
         for m in miss:
             print("  - " + m)
         sys.exit(1)
+    p.setdefault("passed", {})[state] = snapshot(s)
     nxt, _ = next_state(cfg_for(p), p, s, state)
     if nxt != "DONE" and p.get("visits", {}).get(nxt, 0) >= P["max_visits"]:
         save(flow)
@@ -127,8 +129,15 @@ def cmd_back(a, flow):
     order = cfg_for(p)["kinds"][p["kind"]]["states"]
     if a.state not in order or order.index(a.state) >= order.index(p["state"]):
         sys.exit(f"{a.state}는 {p['state']}보다 앞 상태가 아니다")
+    allowed = cfg_for(p)["kinds"][p["kind"]].get("back", {}).get(p["state"])
+    if allowed is not None and a.state not in allowed:
+        where = f"{', '.join(allowed)}로만 돌아갈 수 있다" if allowed else "돌아갈 수 없다"
+        sys.exit(f"{p['kind']}의 {p['state']}에서는 {where}(config.toml의 back). 다른 경로가 필요하면 구조 변경 "
+                 "제안서를 쓴다")
     if p.get("visits", {}).get(a.state, 0) >= P["max_visits"]:
         sys.exit(f"{a.pid}가 {a.state}에 {P['max_visits']}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
+    for st in order[order.index(a.state):]:
+        p.get("passed", {}).pop(st, None)
     enter(p, a.state, f"back: {a.why}")
     save(flow)
     show_todo(a.pid, p)

@@ -23,7 +23,7 @@ MUST_PROTECT = (".gate/config.toml", ".gate/history/", ".gate/gatekit/")
 DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choice": "결정", "numbers": "값 근거"}
 # 검사가 기본값 없이 읽는 키
 REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
-            "refs": ("section", "file", "pattern"), "commit_since": ("path",)}
+            "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",)}
 
 
 # lint
@@ -67,6 +67,12 @@ def lint(cfg):
             if s not in states:
                 bad.append(f"{kname}.when: {s}가 이 종류의 상태가 아니다")
             bad += _conds(cond, f"{kname}.when.{s}", opts)
+        for s, targets in k.get("back", {}).items():
+            if s not in states:
+                bad.append(f"{kname}.back: {s}가 이 종류의 상태가 아니다")
+                continue
+            bad += [f"{kname}.back.{s}: {t}가 {s}보다 앞 상태가 아니다" for t in targets
+                    if t not in states[:states.index(s)]]
         tpl = template_text(cfg, kname)
         ts = sections(tpl)
         uses_files = False
@@ -101,6 +107,11 @@ def lint(cfg):
                         bad.append(f"{kname}/{s}: {name}이 가리키는 항목 '{sec}: {it}'이 절 정의에 없다")
                 if name == "reviewed" and c.get("state") not in states:
                     bad.append(f"{kname}/{s}: reviewed가 가리키는 {c.get('state')}가 이 종류에 없다")
+                if name == "unchanged":
+                    if c["state"] not in states[:states.index(s)]:
+                        bad.append(f"{kname}/{s}: unchanged가 가리키는 {c['state']}가 이 종류에서 {s}보다 앞 상태가 아니다")
+                    bad += [f"{kname}/{s}: unchanged가 가리키는 절 '{x}'이 계획 틀에 없다"
+                            for x in c.get("sections", []) if x not in ts]
             if st.get("review") and not isinstance(st["review"], str):
                 bad.append(f"{s}: review는 문자열이다")
         if uses_files and cfg["project"]["files_section"] not in ts:
@@ -126,6 +137,8 @@ def describe(cfg):
             path.append(f"[{s} 조건: {fmt_cond(when[s])}]" if s in when else s)
         opts = f" (선택: {', '.join(k['options'])})" if k.get("options") else ""
         lines.append(f"- {kname}{opts}: " + " → ".join(path) + " → DONE")
+        for s, targets in k.get("back", {}).items():
+            lines.append(f"  - {s}에서 돌아갈 수 있는 상태: {', '.join(targets) or '없음'}")
     lines.append("")
     for s, st in cfg["states"].items():
         flags = [x for x in ("code", "run") if st.get(x)] + (["review"] if st.get("review") else [])
@@ -135,7 +148,8 @@ def describe(cfg):
 
 
 def mermaid(cfg):
-    """종류마다 상태 경로를 Mermaid 상태 다이어그램으로. 조건이 붙은 상태는 건너뛰는 화살표를 같이 그린다"""
+    """종류마다 상태 경로를 Mermaid 상태 다이어그램으로. 조건이 붙은 상태는 건너뛰는 화살표를, back에 적은
+    되돌아가는 경로는 back 화살표를 같이 그린다"""
     out = []
     for kname, k in cfg["kinds"].items():
         states, when = k["states"], k.get("when", {})
@@ -159,6 +173,8 @@ def mermaid(cfg):
                 if dst not in when:
                     break
                 skipped.append(dst)
+        for s, targets in k.get("back", {}).items():
+            lines += [f"    {s} --> {t} : back" for t in targets]
         out += [f"### {kname}", "", "```mermaid", *lines, "```", ""]
     return "\n".join(out)
 
@@ -201,7 +217,7 @@ def diagnose(flow):
     lines = [f"# 하네스 진단 ({now()})", "",
              f"- 지금 구조 버전: {CFG['version']}, 마지막 adopt: {hz.get('adopted', '설치')} {hz.get('at', '')}",
              f"- PROFILE.md: {'있음' if (GATE_DIR / 'PROFILE.md').exists() else '없음'}", ""]
-    stat = {}
+    stat, edges = {}, {}
 
     def slot(kind, state):
         return stat.setdefault((kind, state), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [],
@@ -216,6 +232,10 @@ def diagnose(flow):
             d = slot(p["kind"], x[0])
             d["visits"] += 1
             d["back"] += len(x) > 3 and str(x[3]).startswith("back")
+        h = _entered(p)
+        for (src, *_), x in zip(h, h[1:]):
+            if len(x) > 3 and str(x[3]).startswith("back: "):
+                edges.setdefault((p["kind"], src, x[0]), []).append(str(x[3])[6:])
         for s in p.get("skipped", []):
             slot(p["kind"], s)["skip"] += 1
         if p["state"] == "ABANDONED" and len(p.get("history", [])) >= 2:
@@ -242,6 +262,13 @@ def diagnose(flow):
         ch = f"{statistics.median(d['chars']):.0f}" if d["chars"] else ""
         lines.append(f"| {k} | {s} | {d['visits']} | {d['back']} | {d['skip']} | {d['abandon']} | {med} | {ch} | "
                      + "; ".join(x[:60] for x in d["fail"][:3]) + " |")
+    lines += ["", "## 되돌아간 경로", ""]
+    if edges:
+        lines += ["| 종류 | 떠난 상태 | 돌아간 상태 | 횟수 | 이유 |", "|---|---|---|---|---|"]
+        lines += [f"| {k} | {src} | {dst} | {len(why)} | " + "; ".join(w[:60] for w in why[-3:]) + " |"
+                  for (k, src, dst), why in sorted(edges.items())]
+    else:
+        lines.append("없음")
     done = [p for p in flow["plans"].values() if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since_ts]
     lines += ["", f"- 마지막 adopt 뒤 끝난 계획: {len(done)}개"]
     ev = read_events(since_ts)

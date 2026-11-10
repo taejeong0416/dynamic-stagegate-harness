@@ -11,7 +11,7 @@ import shutil
 import subprocess
 
 from .core import (CFG, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, new_numbers, now,
-                   num_value, plan_files, plan_hash, result_status, tables)
+                   num_value, plan_files, plan_hash, result_status, snapshot, tables)
 
 CHECKS = {}
 
@@ -199,6 +199,24 @@ def reviewed(ctx, spec):
     if not rev or not rev["pass"] or rev["hash"] != plan_hash(ctx["text"], ctx["cfg"]):
         return [f"{spec['state']}에서 검토한 계획 내용이 바뀌었다. back으로 {spec['state']}에 돌아가 다시 검토를 받는다"]
     return []
+
+
+@check
+def unchanged(ctx, spec):
+    """state를 넘긴 뒤 그 상태가 쓰는 절이 바뀌지 않았다. sections로 볼 절을, section과 items로 bullet 항목을 고른다.
+    조건이 맞지 않아 건너뛴 상태는 보지 않는다"""
+    p, st = ctx["p"], spec["state"]
+    snap = p.get("passed", {}).get(st)
+    if snap is None:
+        return [] if st in p.get("skipped", []) else [f"{st}를 넘긴 기록이 없다. back으로 {st}에 돌아가 다시 넘긴다"]
+    if spec.get("items"):
+        keys = [f"{spec['section']}: {k}" for k in spec["items"]]
+    else:
+        keys = spec.get("sections") or ([spec["section"]] if spec.get("section") else
+                                        ctx["cfg"]["states"][st].get("sections", []))
+    cur = snapshot(ctx["s"])
+    return [f"{st}를 넘긴 뒤 '{k}'이 바뀌었다. 되돌리거나 back으로 {st}에 돌아가 다시 넘긴다"
+            for k in keys if snap.get(k) != cur.get(k)]
 
 
 def applies(spec, kind):

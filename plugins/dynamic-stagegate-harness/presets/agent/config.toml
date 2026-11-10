@@ -19,12 +19,15 @@ tools = "Read,Grep,Glob"
 
 [kinds.behavior]
 states = ["SPEC", "EVALSET", "IMPLEMENT", "EVAL", "RECORD", "REPLAN"]
+back = {EVAL = ["IMPLEMENT", "EVALSET", "SPEC"]}
 
 [kinds.prompt]
 states = ["PLAN", "IMPLEMENT", "EVAL", "RECORD", "REPLAN"]
+back = {EVAL = ["IMPLEMENT", "PLAN"]}
 
 [kinds.bugfix]
 states = ["REPRO", "FIX", "VERIFY", "RECORD"]
+back = {VERIFY = ["FIX", "REPRO"]}
 
 [kinds.chore]
 states = ["IMPLEMENT", "RECORD"]
@@ -156,6 +159,8 @@ todo = [
 ]
 checks = [
   {check = "clean"},
+  {check = "unchanged", state = "EVALSET", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["behavior"]},
+  {check = "unchanged", state = "PLAN", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["prompt"]},
   {check = "results", section = "평가", item = "결과 파일"},
   {check = "table", section = "평가 결과"},
 ]
@@ -184,6 +189,7 @@ checks = [
   {check = "filled", section = "원인"},
   {check = "clean"},
   {check = "files_changed", any = true},
+  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
   {check = "command", section = "재현", item = "재현 명령"},
 ]
 
@@ -215,5 +221,7 @@ todo = [
 ]
 checks = [
   {check = "filled", section = "결정", items = ["고른 갈래", "다음 계획"]},
+  {check = "unchanged", state = "SPEC", sections = ["결과별 다음 행동"], only = ["behavior"]},
+  {check = "unchanged", state = "PLAN", sections = ["결과별 다음 행동"], only = ["prompt"]},
   {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖"},
 ]

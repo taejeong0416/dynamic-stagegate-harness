@@ -23,12 +23,15 @@ tools = "Read,Grep,Glob"
 
 [kinds.feature]
 states = ["SPEC", "PLAN", "TESTFIRST", "IMPLEMENT", "TEST", "RECORD"]
+back = {TEST = ["IMPLEMENT", "PLAN", "SPEC"]}
 
 [kinds.bugfix]
 states = ["REPRO", "FIX", "VERIFY", "RECORD"]
+back = {VERIFY = ["FIX", "REPRO"]}
 
 [kinds.refactor]
 states = ["PLAN", "IMPLEMENT", "TEST", "RECORD"]
+back = {TEST = ["IMPLEMENT", "PLAN"]}
 
 [kinds.chore]
 states = ["IMPLEMENT", "RECORD"]
@@ -151,6 +154,8 @@ todo = [
 ]
 checks = [
   {check = "clean"},
+  {check = "unchanged", state = "SPEC", only = ["feature"]},
+  {check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"]},
   {check = "command", section = "테스트 계획", item = "새 테스트 명령", only = ["feature"]},
   {check = "command", use = "test", section = "테스트 계획", item = "테스트 명령"},
   {check = "table", section = "테스트 결과"},
@@ -180,6 +185,7 @@ checks = [
   {check = "filled", section = "원인"},
   {check = "clean"},
   {check = "files_changed", any = true},
+  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
   {check = "command", section = "재현", item = "재현 명령"},
 ]
 
