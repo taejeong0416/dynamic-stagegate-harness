@@ -340,8 +340,11 @@ PATH_TOKEN = re.compile(r"[\w.][\w./-]*")
 
 
 def plan_files(s):
-    """계획이 고치겠다고 적은 코드 파일(files_section 절의 경로 중 code 패턴에 맞는 것)"""
-    text = "\n".join(s.get(P["files_section"], []))
+    """계획이 고치겠다고 적은 코드 파일(files_section 절의 경로 중 code 패턴에 맞는 것).
+    표가 있으면 첫 칸만 본다. 설명 칸에 적은 경로를 고칠 파일로 치지 않기 위해서다"""
+    lines = s.get(P["files_section"], [])
+    rows = [r for t in tables(lines) for r in t if r]
+    text = "\n".join(r[0] for r in rows) if rows else "\n".join(lines)
     return sorted({t.strip("`") for t in PATH_TOKEN.findall(text.replace("`", " ")) if is_code(t.strip("`"))})
 
 

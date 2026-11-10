@@ -187,6 +187,16 @@ class FlowTest(Repo):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("src/other.py", r.stdout + r.stderr)
 
+    def test_변경_파일_표의_설명_칸에_적은_경로는_고칠_파일로_치지_않는다(self):
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.fill_chore("P001")
+        self.edit("plans/P001.md", ("| src/a.py | 새 파일 |", "| src/a.py | src/other.py와 같은 형식 |"))
+        self.write("src/other.py", "b = 2\n")
+        self.git("add", "src/other.py")
+        r = self.git("commit", "-qm", "feat: other")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("src/other.py", r.stdout + r.stderr)
+
     def test_commit_msg는_하네스_커밋을_따로_두게_한다(self):
         self.write(".gate/GATE.md", "x\n")
         self.git("add", ".gate/GATE.md")
