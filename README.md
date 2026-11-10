@@ -2,14 +2,14 @@
 
 # dynamic-stagegate-harness
 
-Claude Code 에이전트의 작업을 관문이 있는 상태 기계로 진행시키고, 진행 기록을 근거로 그 관문 구조를 고쳐 가는 하네스 플러그인이다.
+Claude Code 에이전트의 작업을 단계로 나누고 단계마다 넘어가는 조건을 검사하며, 진행 기록을 근거로 그 단계 구조를 고쳐 가는 하네스 플러그인이다.
 
 ![version](https://img.shields.io/badge/version-0.3.0-555)
 ![license](https://img.shields.io/badge/license-MIT-555)
 ![python](https://img.shields.io/badge/python-3.11%2B-555)
 ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-555)
 
-작업마다 계획 파일 하나와 상태 경로가 있다. 상태마다 할 일과 넘어가는 조건이 있고, 조건은 모델의 판단이 아니라 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사한다. 상태에 맞지 않는 행동은 Claude Code hook과 git hook이 막는다.
+각 단계는 state machine의 상태이고, 작업마다 계획 파일 하나와 상태 경로가 있다. 상태마다 할 일과 넘어가는 조건이 있고, 조건은 모델의 판단이 아니라 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사한다. 상태에 맞지 않는 행동은 Claude Code hook과 git hook이 막는다.
 
 상태 경로는 프로젝트가 자라면서 구조 변경 제안서로 바꿀 수 있다. 제안서는 에이전트가 진행 기록을 진단해 쓰고, lint와 지난 계획 재생과 검토자를 거쳐 사용자가 승인해야 적용된다. 이름은 단계마다 관문을 통과해야 다음으로 넘어가는 Stage-Gate 방식에서 따왔고, 관문 구조가 바뀐다는 뜻으로 dynamic을 붙였다.
 
@@ -142,7 +142,7 @@ stateDiagram-v2
 
 ## 비슷한 접근과 차이
 
-LLM 작업을 상태 기계나 그래프로 나누는 방법은 이미 여럿 있는데, 이 하네스는 에이전트 런타임을 새로 만들지 않은 채 Claude Code 바깥에서 관문을 검사한다.
+LLM 작업을 state machine이나 그래프로 나누는 방법은 이미 여럿 있는데, 이 하네스는 에이전트 런타임을 새로 만들지 않은 채 Claude Code 바깥에서 관문을 검사한다.
 
 | 접근 | 하는 일 | 이 하네스와 다른 점 |
 |---|---|---|

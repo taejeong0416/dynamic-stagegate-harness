@@ -1,6 +1,6 @@
 ---
 name: setup
-description: 프로젝트에 stagegate 상태 기계 하네스를 설치하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 구조를 정한다. 엔진 갱신(update)도 한다. 사용자가 "stagegate 하네스 설치", "setup", "상태 기계 깔아줘", "하네스 갱신"이라고 하거나 preset(ml, agent, service)을 골라 하네스를 넣어 달라고 할 때 쓴다.
+description: 프로젝트에 stagegate state machine 하네스를 설치하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 구조를 정한다. 엔진 갱신(update)도 한다. 사용자가 "stagegate 하네스 설치", "setup", "하네스 깔아줘", "하네스 갱신"이라고 하거나 preset(ml, agent, service)을 골라 하네스를 넣어 달라고 할 때 쓴다.
 argument-hint: "<ml|agent|service|update>"
 ---
 
@@ -21,7 +21,7 @@ preset은 출발점이다. 인터뷰 결과로 상태를 더하거나 빼고 경
 ## 1. 설치
 
 1. 프로젝트 루트가 git 저장소이고 커밋이 하나 이상 있는지 본다. 없으면 사용자에게 `git init`과 첫 커밋을 먼저 하자고 한다.
-2. 프로젝트에 이미 다른 하네스(`.claude/settings.json`의 상태 기계 hook, `.githooks/`)가 있으면 멈추고 사용자에게 알린다. 두 하네스를 함께 돌리지 않는다.
+2. 프로젝트에 이미 다른 하네스(`.claude/settings.json`의 state machine hook, `.githooks/`)가 있으면 멈추고 사용자에게 알린다. 두 하네스를 함께 돌리지 않는다.
 3. 인자가 없으면 저장소를 보고 가장 가까운 preset을 권하고 사용자에게 고르게 한다.
 4. 설치 스크립트를 돌린다.
    ```

@@ -1,9 +1,9 @@
 ---
 name: gate
-description: .gate/config.toml이 있는 프로젝트에서 작업을 상태 기계로 진행하는 방법. 그런 프로젝트에서 코드를 고치거나 실험, 기능, 버그 수정을 시작할 때, hook이 행동을 막았을 때, "gate", "stagegate", "상태 기계", "next", "계획 파일"을 말할 때 쓴다.
+description: .gate/config.toml이 있는 프로젝트에서 작업을 state machine으로 진행하는 방법. 그런 프로젝트에서 코드를 고치거나 실험, 기능, 버그 수정을 시작할 때, hook이 행동을 막았을 때, "gate", "stagegate", "state machine", "상태 머신", "next", "계획 파일"을 말할 때 쓴다.
 ---
 
-# stagegate 상태 기계로 일하기
+# stagegate state machine으로 일하기
 
 이 프로젝트의 작업은 계획 파일과 상태 경로로 진행한다. 구조의 원본은 `.gate/config.toml`이고 `python -X utf8 .gate/gate.py describe`가 지금 경로를 보여 준다. 명령과 원칙은 `.gate/GATE.md`, 프로젝트 목적은 `.gate/PROFILE.md`에 있다.
 

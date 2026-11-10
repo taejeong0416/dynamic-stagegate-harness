@@ -2,6 +2,6 @@
   "name": "dynamic-stagegate-harness",
   "version": "0.3.0",
   "license": "MIT",
-  "description": "작업을 관문이 있는 상태 기계로 진행시키는 하네스다. 상태마다 할 일과 넘어가는 조건을 두고, hook과 git hook으로 상태에 맞지 않는 행동을 막는다. 구조는 ml, agent, service preset에서 시작하고, 진행 기록을 진단한 제안과 사용자 승인으로 바꾼다.",
+  "description": "작업을 단계로 나누고 단계마다 넘어가는 조건을 검사하는 하네스다. 단계에 맞지 않는 행동은 hook과 git hook으로 막는다. 단계 구조는 ml, agent, service preset에서 시작하고, 진행 기록을 진단한 제안과 사용자 승인으로 바꾼다.",
   "author": {"name": "taejeong0416"}
 }

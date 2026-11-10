@@ -1,5 +1,5 @@
 {
-  "description": "dynamic-stagegate-harness: .gate/config.toml이 있는 프로젝트에서만 상태 기계 검사를 건다",
+  "description": "dynamic-stagegate-harness: .gate/config.toml이 있는 프로젝트에서만 state machine 검사를 건다",
   "hooks": {
     "SessionStart": [
       {
