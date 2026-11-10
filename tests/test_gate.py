@@ -212,6 +212,23 @@ class FlowTest(Repo):
         r = self.gate("back", "P001", "IMPLEMENT", "--why", "w")
         self.assertIn("3번 들어왔다", r.stderr)
 
+    def test_종류의_상한을_벗어나면_커밋과_next를_막는다(self):
+        self.edit(".gate/config.toml", ("limit = {max_files = 5}", "limit = {max_files = 1}"))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: 상한").returncode, 0)
+        self.assertIn("상한: max_files=1", self.gate("describe").stdout)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.fill_chore("P001")
+        self.edit("plans/P001.md", ("| src/a.py | 새 파일 |", "| src/a.py | 새 파일 |\n| src/b.py | 새 파일 |"))
+        self.write("src/a.py", "a = 2\n")
+        self.git("add", "src/a.py")
+        r = self.git("commit", "-qm", "feat: a")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("chore 종류의 상한(max_files=1)을 벗어났다", r.stdout + r.stderr)
+        r = self.gate("next", "P001")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("chore 종류의 상한(max_files=1)을 벗어났다", r.stdout)
+
     def bugfix_to_fix(self):
         """bugfix 계획을 REPRO에서 넘겨 FIX에 두고, 고친 코드까지 커밋한다"""
         self.gate("start", "--kind", "bugfix", "--title", "b")

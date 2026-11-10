@@ -8,9 +8,9 @@ from pathlib import Path
 
 from . import evolve
 from .checks import run_checks
-from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, git, head, is_code, is_harness, load, next_state, now,
-                   parse_config, plan_files, plan_text, save, sections, snapshot, state_def, structure_problems,
-                   template_text)
+from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, cond_holds, git, head, is_code, is_harness, load,
+                   next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot, state_def,
+                   structure_problems, template_text)
 
 CLI = "python -X utf8 .gate/gate.py"
 
@@ -46,6 +46,16 @@ def stage_kinds(flow):
     for st in CFG["stages"]:
         if st["n"] == flow.get("stage"):
             return set(st["kinds"])
+    return None
+
+
+def limit_problem(p, s):
+    """종류의 limit 조건을 벗어났으면 그 이유"""
+    cfg = cfg_for(p)
+    limit = cfg["kinds"][p["kind"]].get("limit")
+    if limit and not cond_holds(limit, p, s, cfg):
+        return (f"{p['kind']} 종류의 상한({evolve.fmt_cond(limit)})을 벗어났다. 사용자에게 알리고, 이 계획을 abandon한 뒤 "
+                "맞는 종류로 start --from해서 잇는다")
     return None
 
 
@@ -99,6 +109,8 @@ def cmd_next(a, flow):
     text = plan_text(p)
     s = sections(text)
     miss = structure_problems(p, text)
+    if not miss and limit_problem(p, s):
+        miss = [limit_problem(p, s)]
     if not miss:
         ctx = {"pid": pid, "p": p, "text": text, "s": s, "flow": flow, "state": state, "cfg": cfg_for(p),
                "allow_review": a.review}
@@ -219,9 +231,12 @@ def cmd_pre_commit(a, flow):
     code = [f for f in staged() if f and is_code(f)]
     if code:
         allowed = set()
-        for p in flow["plans"].values():
+        for pid, p in flow["plans"].items():
             if p["state"] not in CLOSED and state_def(p).get("code"):
-                allowed |= set(plan_files(sections(plan_text(p))))
+                s = sections(plan_text(p))
+                allowed |= set(plan_files(s))
+                if set(code) & set(plan_files(s)) and limit_problem(p, s):
+                    fail.append(f"{pid}: {limit_problem(p, s)}")
         fail += [f"{f}: 코드를 고치는 상태인 계획의 '{P['files_section']}' 절에 없는 파일이다" for f in code
                  if f not in allowed]
     for cmd in P["pre_commit"]:

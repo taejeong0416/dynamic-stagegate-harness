@@ -67,6 +67,7 @@ def lint(cfg):
             if s not in states:
                 bad.append(f"{kname}.when: {s}가 이 종류의 상태가 아니다")
             bad += _conds(cond, f"{kname}.when.{s}", opts)
+        bad += _conds(k.get("limit", {}), f"{kname}.limit", opts)
         for s, targets in k.get("back", {}).items():
             if s not in states:
                 bad.append(f"{kname}.back: {s}가 이 종류의 상태가 아니다")
@@ -136,6 +137,7 @@ def describe(cfg):
         for s in k["states"]:
             path.append(f"[{s} 조건: {fmt_cond(when[s])}]" if s in when else s)
         opts = f" (선택: {', '.join(k['options'])})" if k.get("options") else ""
+        opts += f" (상한: {fmt_cond(k['limit'])})" if k.get("limit") else ""
         lines.append(f"- {kname}{opts}: " + " → ".join(path) + " → DONE")
         for s, targets in k.get("back", {}).items():
             lines.append(f"  - {s}에서 돌아갈 수 있는 상태: {', '.join(targets) or '없음'}")

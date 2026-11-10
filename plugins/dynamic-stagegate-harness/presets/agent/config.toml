@@ -31,6 +31,8 @@ back = {VERIFY = ["FIX", "REPRO"]}
 
 [kinds.chore]
 states = ["IMPLEMENT", "RECORD"]
+# 이 조건을 벗어난 계획은 넘어가지 못한다. 5는 근거 없이 정한 값
+limit = {max_files = 5}
 
 [sections."목표 동작"]
 
