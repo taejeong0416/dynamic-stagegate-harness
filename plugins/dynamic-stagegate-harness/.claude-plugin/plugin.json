@@ -1,5 +1,5 @@
 {
-  "name": "flow-harness",
+  "name": "dynamic-stagegate-harness",
   "version": "0.2.0",
   "description": "작업을 상태 기계로 진행시키는 하네스. 상태마다 할 일과 넘어가는 조건을 두고, hook과 git hook으로 상태에 맞지 않는 행동을 막는다. ml, agent, service preset에서 출발해, 진행 기록을 진단한 구조 변경 제안과 사용자 승인으로 상태 경로를 바꾼다.",
   "author": {"name": "taejeong0416"}

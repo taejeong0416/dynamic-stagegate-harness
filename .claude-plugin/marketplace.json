@@ -1,10 +1,10 @@
 {
-  "name": "flow-harness",
+  "name": "dynamic-stagegate-harness",
   "owner": {"name": "taejeong0416"},
   "plugins": [
     {
-      "name": "flow-harness",
-      "source": "./plugins/flow-harness",
+      "name": "dynamic-stagegate-harness",
+      "source": "./plugins/dynamic-stagegate-harness",
       "description": "작업을 상태 기계로 진행시키는 하네스(ml, agent, service preset)"
     }
   ]

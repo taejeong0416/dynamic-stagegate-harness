@@ -1,6 +1,8 @@
-# flow-harness
+# dynamic-stagegate-harness
 
 Claude Code에서 작업을 상태 기계로 진행시키는 하네스 플러그인이다. 작업 하나는 계획 파일 하나와 상태 경로를 가지고, 상태마다 할 일과 넘어가는 조건이 있다. 조건은 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사하며, 상태에 맞지 않는 행동은 Claude Code hook과 git hook이 막는다. 상태 경로는 고정된 틀이 아니어서, 프로젝트가 자라면 에이전트가 진행 기록을 진단해 구조 변경을 제안하고 사용자 승인을 받아 바꾼다.
+
+이름은 단계마다 관문을 통과해야 다음으로 넘어가는 Stage-Gate 방식에서 따왔고, 그 관문 구조가 바뀐다는 뜻으로 dynamic을 붙였다. 프로젝트 안에서는 짧게 `.flow/` 폴더와 `flow` 명령을 쓴다.
 
 ## 주요 기능
 
@@ -26,7 +28,7 @@ preset은 출발점이다. 설치하면 세 preset의 구조가 `.flow/library/`
 
 ```
 .claude-plugin/marketplace.json      로컬 마켓플레이스
-plugins/flow-harness/
+plugins/dynamic-stagegate-harness/
   .claude-plugin/plugin.json
   hooks/hooks.json, run.py            설정이 있는 프로젝트에서만 그 프로젝트의 엔진을 부른다
   flowkit/                            엔진(설치하면 프로젝트의 .flow/flowkit/로 복사된다)
@@ -55,9 +57,9 @@ Python 3.11 이상과 git이 필요하다.
    ```
 2. 플러그인을 설치한다.
    ```
-   claude plugin install flow-harness@flow-harness
+   claude plugin install dynamic-stagegate-harness@dynamic-stagegate-harness
    ```
-3. 하네스를 쓸 프로젝트에서 Claude Code를 열고 `/flow-harness:flow-setup service`처럼 preset을 골라 부른다. 설치가 끝나면 목적 인터뷰가 이어진다.
+3. 하네스를 쓸 프로젝트에서 Claude Code를 열고 `/dynamic-stagegate-harness:flow-setup service`처럼 preset을 골라 부른다. 설치가 끝나면 목적 인터뷰가 이어진다.
 
 플러그인은 사용자 범위로 설치해도 `.flow/config.toml`이 없는 프로젝트에서는 hook이 아무것도 하지 않는다.
 
