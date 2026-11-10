@@ -5,7 +5,7 @@
     {
       "name": "dynamic-stagegate-harness",
       "source": "./plugins/dynamic-stagegate-harness",
-      "description": "작업을 상태 기계로 진행시키는 하네스(ml, agent, service preset)"
+      "description": "작업을 관문이 있는 상태 기계로 진행시키는 하네스 플러그인"
     }
   ]
 }

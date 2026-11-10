@@ -9,7 +9,7 @@ Claude Code 에이전트의 작업을 관문이 있는 상태 기계로 진행�
 ![python](https://img.shields.io/badge/python-3.11%2B-555)
 ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-555)
 
-작업 하나는 계획 파일 하나와 상태 경로를 가진다. 상태마다 할 일과 넘어가는 조건이 있고, 조건은 모델의 판단이 아니라 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사한다. 상태에 맞지 않는 행동은 Claude Code hook과 git hook이 막는다.
+작업마다 계획 파일 하나와 상태 경로가 있다. 상태마다 할 일과 넘어가는 조건이 있고, 조건은 모델의 판단이 아니라 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사한다. 상태에 맞지 않는 행동은 Claude Code hook과 git hook이 막는다.
 
 상태 경로는 프로젝트가 자라면서 구조 변경 제안서로 바꿀 수 있다. 제안서는 에이전트가 진행 기록을 진단해 쓰고, lint와 지난 계획 재생과 검토자를 거쳐 사용자가 승인해야 적용된다. 이름은 단계마다 관문을 통과해야 다음으로 넘어가는 Stage-Gate 방식에서 따왔고, 관문 구조가 바뀐다는 뜻으로 dynamic을 붙였다.
 
@@ -71,8 +71,8 @@ Python 3.11 이상과 git이 필요하다.
 ## 주요 기능
 
 - 설치할 때 목적 인터뷰로 프로젝트의 목적, 검증 방법, 작업 종류, 실패 비용을 정하고, 그에 맞춰 preset 구조를 조정한다.
-- `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
-- 코드 상태인 계획이 없으면 코드 편집을 막고, 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막는다. 구조 파일(config.toml, history, gatekit)은 직접 편집을 막는다.
+- `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 계획을 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르게 하거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
+- 코드 상태인 계획이 없으면 코드 편집을 막고, 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막는다. 구조 파일인 config.toml, history, gatekit은 직접 편집을 막는다.
 - 이 세션이 고친 코드나 하네스 파일에 커밋하지 않은 변경이 있거나, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있으면 턴을 끝내지 못하게 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는 막지 않는다.
 - SessionStart hook이 진행 중인 계획과 할 일을 컨텍스트에 넣고, 메시지마다 계획 목록이 한 줄씩 들어간다. 컨텍스트가 압축돼도 상태는 파일에 남아 있어서 다시 들어온다.
 - `gate describe --mermaid`가 지금 구조의 경로를 위와 같은 다이어그램으로 출력한다.
@@ -89,9 +89,9 @@ Python 3.11 이상과 git이 필요하다.
 
 ## 구조 진화
 
-구조는 제안서로만 바꾼다. SessionStart hook은 마지막 구조 변경 뒤 끝난 계획이나 hook이 막은 횟수가 기준을 넘으면 점검을 권한다.
+구조는 제안서로만 바꾼다. SessionStart hook은 마지막 구조 변경 뒤 끝난 계획 수나 hook이 막은 횟수가 기준을 넘으면 점검을 권한다.
 
-1. `gate diagnose`가 상태별 기록(들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유), hook이 막은 기록, 저장소 변화를 모은다.
+1. `gate diagnose`가 상태별로 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유를 모으고, hook이 막은 기록과 저장소 변화도 모은다.
 2. 에이전트가 그 수치를 근거로 `.gate/proposals/H###.md`에 제안서를 쓴다. 상태나 검사를 더하는 변경은 근거 하나로 충분하고, 빼거나 약하게 하는 변경은 진단 수치가 있어야 한다.
 3. `gate check-proposal`이 lint, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다.
 4. 사용자가 바꾸는 것과 근거를 보고 승인하면 `gate adopt`가 적용한다. guard hook은 승인 문장이 이번 턴 사용자 입력에 있는지 확인한다.
@@ -127,11 +127,11 @@ stateDiagram-v2
 | filled | 절이 비어 있지 않다. items를 주면 그 bullet 항목마다 값이 있다 |
 | table | 절의 표에 칸이 모두 찬 행이 min_rows개 이상 있다 |
 | files_listed | "변경 파일" 절에 code 패턴에 맞는 파일이 있다 |
-| files_changed | 그 파일이 이 상태에 처음 들어온 뒤 커밋에서 바뀌었다(any = true면 하나 이상) |
+| files_changed | 이 상태에 처음 들어온 뒤의 커밋에서 그 파일이 바뀌었다(any = true면 하나 이상) |
 | clean | 코드에 커밋하지 않은 변경이 없다 |
 | numbers | 코드에 새로 넣은 숫자(0과 1 제외)가 근거 표 첫 칸에 있다 |
 | sample | 표본 실행 절의 커밋이 코드 파일을 마지막으로 바꾼 커밋이다 |
-| results | 결과 파일이 이 상태에 들어온 뒤에 만들어졌다([remote]가 있으면 서버도 본다) |
+| results | 이 상태에 들어온 뒤에 결과 파일이 만들어졌다([remote]가 있으면 서버도 본다) |
 | command | 명령이 통과한다. use = "test"면 [project] test 명령을 쓰고, expect = "fail"이면 실패해야 한다 |
 | run_record | `gate run` 기록이 있다 |
 | commit_since | 이 상태에 들어온 뒤 path를 바꾼 커밋이 있다(mention = true면 계획 번호를 쓴 줄) |
@@ -142,7 +142,7 @@ stateDiagram-v2
 
 ## 비슷한 접근과 차이
 
-LLM 작업을 상태 기계나 그래프로 나누는 방법은 이미 여럿 있고, 이 하네스는 에이전트 런타임을 새로 만들지 않은 채 Claude Code 바깥에서 관문을 검사한다.
+LLM 작업을 상태 기계나 그래프로 나누는 방법은 이미 여럿 있는데, 이 하네스는 에이전트 런타임을 새로 만들지 않은 채 Claude Code 바깥에서 관문을 검사한다.
 
 | 접근 | 하는 일 | 이 하네스와 다른 점 |
 |---|---|---|
@@ -173,12 +173,12 @@ plugins/dynamic-stagegate-harness/
 
 설치한 프로젝트의 `.gate/`에는 config.toml(지금 구조), history/(앞 구조 버전), library/(빌려 쓸 구조), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
 
-엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 걸린다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다.
+엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 적용된다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다.
 
 ## 한계
 
 - Claude Code 전용이다. 엔진과 git hook은 에이전트와 관계없이 돌지만, 편집 차단과 턴 종료 검사는 Claude Code의 hook 형식과 대화 기록 형식에 맞춰져 있다.
-- 셸 명령 검사는 흔한 우회(리다이렉트, tee, sed -i, cp, mv)만 막고, 그 밖의 방법으로 쓴 코드는 커밋 시점의 pre-commit이 잡는다. 구조 파일을 Python 스크립트로 직접 쓰면 guard가 보지 못하고, commit-msg hook이 `harness:` 커밋으로 따로 남기게 할 뿐이다.
+- 셸 명령 검사는 리다이렉트, tee, sed -i, cp, mv 같은 흔한 우회만 막고, 그 밖의 방법으로 쓴 코드는 커밋 시점의 pre-commit이 잡는다. 구조 파일을 Python 스크립트로 직접 쓰면 guard가 보지 못하고, commit-msg hook이 `harness:` 커밋으로 따로 남기게 할 뿐이다.
 - stop hook은 이 세션이 편집 도구로 고친 파일만 본다. 셸 명령이나 스크립트로 고친 파일은 pre-commit과 `clean` 검사가 잡는다.
 - 숫자 검사는 .py만 tokenize로 정확히 보고, 다른 언어는 문자열과 주석을 지운 뒤 정규식으로 본다.
 - 진단 수치는 판단 자료이고, 상태를 빼거나 더할지는 에이전트의 제안과 사용자 승인으로 정한다.
