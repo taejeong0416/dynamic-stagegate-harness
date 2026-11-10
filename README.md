@@ -83,7 +83,7 @@ Python 3.11 이상과 git이 필요하다.
 |---|---|---|
 | ml | 대회, 연구 실험 | new와 model(RESEARCH부터 REPLAN까지 8개), tune, freeze, repro, eda, infra. 프로젝트 단계별로 허용 종류를 제한하고, 서버 실행은 커밋과 예상 종료 시각 기록 뒤에만 연다 |
 | agent | LLM 에이전트, 프롬프트, 도구 | behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN), prompt, bugfix, chore. eval 케이스를 구현 전에 커밋하고, 결과 파일이 새로 만들어져야 넘어간다 |
-| service | 웹 서비스, 앱 | feature(SPEC, PLAN, TESTFIRST, IMPLEMENT, TEST, RECORD), bugfix(재현 명령이 REPRO에서 실패하고 FIX에서 통과), refactor, chore |
+| service | 웹 서비스, 앱, 라이브러리, CLI | feature(SPEC, PLAN, TESTFIRST, IMPLEMENT, TEST, RECORD), bugfix(재현 명령이 REPRO에서 실패하고 FIX에서 통과), refactor, chore |
 
 고른 preset은 처음 구조로 쓰인다. 설치하면 세 preset의 구조가 `.gate/library/`에 같이 들어가서, 구조를 바꿀 때 다른 preset의 상태와 절을 빌려 쓴다.
 

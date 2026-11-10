@@ -14,7 +14,7 @@ argument-hint: "<ml|agent|service|update>"
 |---|---|---|
 | ml | 대회, 연구 실험. 실험 기록 log.csv, 아이디어 목록, 서버 실행 | new, model, tune, freeze, repro, eda, infra |
 | agent | LLM 에이전트, 프롬프트, 도구 개발. eval을 먼저 고정하고 잰다 | behavior, prompt, bugfix, chore |
-| service | 웹 서비스, 앱 개발. 테스트를 먼저 쓰고 테스트 명령으로 넘어간다 | feature, bugfix, refactor, chore |
+| service | 웹 서비스, 앱, 라이브러리, CLI 개발. 테스트를 먼저 쓰고 테스트 명령으로 넘어간다 | feature, bugfix, refactor, chore |
 
 preset은 출발점이다. 인터뷰 결과로 상태를 더하거나 빼고 경로에 조건을 붙인다. 다른 preset의 상태와 절은 `.gate/library/`에서 빌려 온다.
 
