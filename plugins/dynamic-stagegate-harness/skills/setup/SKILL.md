@@ -1,10 +1,10 @@
 ---
-name: flow-setup
-description: 프로젝트에 flow 상태 기계 하네스를 설치하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 구조를 정한다. 엔진 갱신(update)도 한다. 사용자가 "flow 하네스 설치", "flow-setup", "상태 기계 깔아줘", "하네스 갱신"이라고 하거나 preset(ml, agent, service)을 골라 하네스를 넣어 달라고 할 때 쓴다.
+name: setup
+description: 프로젝트에 stagegate 상태 기계 하네스를 설치하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 구조를 정한다. 엔진 갱신(update)도 한다. 사용자가 "stagegate 하네스 설치", "setup", "상태 기계 깔아줘", "하네스 갱신"이라고 하거나 preset(ml, agent, service)을 골라 하네스를 넣어 달라고 할 때 쓴다.
 argument-hint: "<ml|agent|service|update>"
 ---
 
-# flow 하네스 설치
+# stagegate 하네스 설치
 
 인자: `$ARGUMENTS` (ml, agent, service 중 하나이거나 update)
 
@@ -16,7 +16,7 @@ argument-hint: "<ml|agent|service|update>"
 | agent | LLM 에이전트, 프롬프트, 도구 개발. eval을 먼저 고정하고 잰다 | behavior, prompt, bugfix, chore |
 | service | 웹 서비스, 앱 개발. 테스트를 먼저 쓰고 테스트 명령으로 넘어간다 | feature, bugfix, refactor, chore |
 
-preset은 출발점이다. 인터뷰 결과로 상태를 더하거나 빼고 경로에 조건을 붙인다. 다른 preset의 상태와 절은 `.flow/library/`에서 빌려 온다.
+preset은 출발점이다. 인터뷰 결과로 상태를 더하거나 빼고 경로에 조건을 붙인다. 다른 preset의 상태와 절은 `.gate/library/`에서 빌려 온다.
 
 ## 1. 설치
 
@@ -27,8 +27,8 @@ preset은 출발점이다. 인터뷰 결과로 상태를 더하거나 빼고 경
    ```
    python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" <preset> --target "<프로젝트 루트>"
    ```
-5. 하네스 파일만 먼저 커밋한다. `git add .flow .githooks`, `git reset .flow/state.json`, `git commit -m "harness: flow 하네스 설치"`. 상태 파일은 따로 커밋한다.
-6. `python -X utf8 .flow/flow.py describe`로 설치된 구조를 보여 준다.
+5. 하네스 파일만 먼저 커밋한다. `git add .gate .githooks`, `git reset .gate/state.json`, `git commit -m "harness: stagegate 하네스 설치"`. 상태 파일은 따로 커밋한다.
+6. `python -X utf8 .gate/gate.py describe`로 설치된 구조를 보여 준다.
 
 ## 2. 목적 인터뷰
 
@@ -51,9 +51,9 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 
 ## 3. PROFILE.md와 첫 구조
 
-1. `.flow/PROFILE.md`에 답을 쓴다. 절은 목적, 성공 기준, 검증 방법, 주로 하는 작업, 실패 비용, 산출물, 코드 위치, 실행 환경, 단계다. 사용자의 말을 그대로 옮기고 해석을 덧붙이지 않는다.
+1. `.gate/PROFILE.md`에 답을 쓴다. 절은 목적, 성공 기준, 검증 방법, 주로 하는 작업, 실패 비용, 산출물, 코드 위치, 실행 환경, 단계다. 사용자의 말을 그대로 옮기고 해석을 덧붙이지 않는다.
 2. 설치된 구조와 PROFILE이 맞지 않는 곳을 찾는다. 바꿀 곳이 없으면 PROFILE만 커밋하고 끝낸다.
-3. 바꿀 곳이 있으면 flow-evolve skill의 제안서 절차로 H001을 쓴다. 근거 칸에는 PROFILE의 해당 절을 인용한다. `check-proposal H001 --review`, 사용자 승인, `adopt` 순서로 적용한다.
+3. 바꿀 곳이 있으면 evolve skill의 제안서 절차로 H001을 쓴다. 근거 칸에는 PROFILE의 해당 절을 인용한다. `check-proposal H001 --review`, 사용자 승인, `adopt` 순서로 적용한다.
 
 ## 갱신(update)
 
@@ -63,4 +63,4 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" --update --target "<프로젝트 루트>"
 ```
 
-출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .flow/flow.py lint`가 통과하는지 본다.
+출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .gate/gate.py lint`가 통과하는지 본다.

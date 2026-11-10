@@ -1,8 +1,8 @@
 """설정, 구조 버전, 상태 파일, 계획 파일 파싱, git 도우미.
 
-이 패키지는 프로젝트의 .flow/flowkit/에 복사되어 돈다. 프로젝트 루트는 .flow/의 부모다.
-구조(종류, 상태, 절, 조건부 경로)는 .flow/config.toml에 있고 version으로 센다. 바뀔 때마다 앞 버전은
-.flow/history/v<N>.toml에 남고, 계획은 시작할 때의 버전을 끝까지 쓴다.
+이 패키지는 프로젝트의 .gate/gatekit/에 복사되어 돈다. 프로젝트 루트는 .gate/의 부모다.
+구조(종류, 상태, 절, 조건부 경로)는 .gate/config.toml에 있고 version으로 센다. 바뀔 때마다 앞 버전은
+.gate/history/v<N>.toml에 남고, 계획은 시작할 때의 버전을 끝까지 쓴다.
 """
 import fnmatch
 import hashlib
@@ -18,19 +18,19 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-FLOW_DIR = ROOT / ".flow"
+GATE_DIR = ROOT / ".gate"
 CLOSED = ("DONE", "ABANDONED")
 
 DEFAULTS = {
     "plans_dir": "plans",
-    "state_file": ".flow/state.json",
+    "state_file": ".gate/state.json",
     "plan_prefix": "P",
     "code": [],
     "tracked": [],
-    "harness": [".flow/flowkit/", ".flow/flow.py", ".flow/config.toml", ".flow/history/", ".flow/library/",
-                ".flow/FLOW.md", ".githooks/"],
-    # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 flow adopt로만 바꾼다
-    "protected": [".flow/config.toml", ".flow/history/", ".flow/flowkit/", ".flow/flow.py"],
+    "harness": [".gate/gatekit/", ".gate/gate.py", ".gate/config.toml", ".gate/history/", ".gate/library/",
+                ".gate/GATE.md", ".githooks/"],
+    # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 gate adopt로만 바꾼다
+    "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py"],
     "harness_prefix": "harness:",
     "max_visits": 3,
     "files_section": "변경 파일",
@@ -54,7 +54,7 @@ def parse_config(text):
             "stages": raw.get("stages", []), "remote": raw.get("remote", {}), "review": raw.get("review", {})}
 
 
-CFG = parse_config((FLOW_DIR / "config.toml").read_text(encoding="utf-8"))
+CFG = parse_config((GATE_DIR / "config.toml").read_text(encoding="utf-8"))
 P = CFG["project"]
 _versions = {CFG["version"]: CFG}
 
@@ -63,7 +63,7 @@ def cfg_for(p=None):
     """계획이 시작할 때의 구조. 계획이 없으면 지금 구조"""
     v = (p or {}).get("version", CFG["version"])
     if v not in _versions:
-        f = FLOW_DIR / "history" / f"v{v}.toml"
+        f = GATE_DIR / "history" / f"v{v}.toml"
         _versions[v] = parse_config(f.read_text(encoding="utf-8")) if f.exists() else CFG
     return _versions[v]
 
@@ -133,7 +133,7 @@ def next_state(cfg, p, s, after):
 
 def log_event(kind, reason):
     try:
-        with open(git_path("flow-events.jsonl"), "a", encoding="utf-8") as f:
+        with open(git_path("gate-events.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200]},
                                ensure_ascii=False) + "\n")
     except OSError:
@@ -141,7 +141,7 @@ def log_event(kind, reason):
 
 
 def read_events(since=0):
-    f = git_path("flow-events.jsonl")
+    f = git_path("gate-events.jsonl")
     if not f.exists():
         return []
     out = []
@@ -427,13 +427,13 @@ class Lock:
     STALE = 20 * 60  # 검토 호출 시간 제한(600초)보다 길게
 
     def __enter__(self):
-        self.path = git_path("flow.lock")
+        self.path = git_path("gate.lock")
         if self.path.exists() and time.time() - self.path.stat().st_mtime > self.STALE:
             self.path.unlink(missing_ok=True)
         try:
             os.close(os.open(self.path, os.O_CREAT | os.O_EXCL))
         except FileExistsError:
-            raise SystemExit("다른 flow 명령이 진행 중이다(git 폴더의 flow.lock). 끝난 뒤 다시 실행한다")
+            raise SystemExit("다른 gate 명령이 진행 중이다(git 폴더의 gate.lock). 끝난 뒤 다시 실행한다")
 
     def __exit__(self, *exc):
         self.path.unlink(missing_ok=True)

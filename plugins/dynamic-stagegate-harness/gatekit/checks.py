@@ -98,7 +98,7 @@ def results(ctx, spec):
     paths = bullets(ctx["s"].get(name, [])).get(item, "").replace(",", " ").split()
     if not paths:
         return [f"'{name}' 절의 '{item}'이 비었다"]
-    bad = [x for x in paths if x.startswith((CFG["project"]["plans_dir"], ".flow/"))]
+    bad = [x for x in paths if x.startswith((CFG["project"]["plans_dir"], ".gate/"))]
     return [f"결과 파일로 계획 문서를 쓸 수 없다: {x}" for x in bad] or \
         result_status(paths, ctx["p"]["entered"][ctx["state"]]["ts"])
 
@@ -129,8 +129,8 @@ def command(ctx, spec):
 
 @check
 def run_record(ctx, spec):
-    """flow run으로 예상 종료 시각과 근거를 적었다"""
-    return [] if ctx["p"].get("run") else ["flow run 기록이 없다"]
+    """gate run으로 예상 종료 시각과 근거를 적었다"""
+    return [] if ctx["p"].get("run") else ["gate run 기록이 없다"]
 
 
 @check
@@ -251,7 +251,7 @@ def call_reviewer(prompt, model=None):
                             "--setting-sources", "local", "--tools", CFG["review"].get("tools", "Read,Grep,Glob"),
                             "--no-session-persistence", "--output-format", "json", "--json-schema", REVIEW_SCHEMA],
                            cwd=ROOT, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                           timeout=CFG["review"].get("timeout", 600), env=os.environ | {"FLOW_REVIEW": "1"})
+                           timeout=CFG["review"].get("timeout", 600), env=os.environ | {"GATE_REVIEW": "1"})
         out = json.loads(r.stdout)
         return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd")}
     except Exception as e:

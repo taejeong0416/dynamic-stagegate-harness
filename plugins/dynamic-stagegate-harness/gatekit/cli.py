@@ -1,4 +1,4 @@
-"""flow 명령. 프로젝트 루트에서 python -X utf8 .flow/flow.py <명령>으로 부른다."""
+"""gate 명령. 프로젝트 루트에서 python -X utf8 .gate/gate.py <명령>으로 부른다."""
 import argparse
 import re
 import subprocess
@@ -11,7 +11,7 @@ from .checks import run_checks
 from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, git, head, is_code, is_harness, load, next_state, now,
                    parse_config, plan_files, plan_text, save, sections, state_def, structure_problems, template_text)
 
-CLI = "python -X utf8 .flow/flow.py"
+CLI = "python -X utf8 .gate/gate.py"
 
 
 def enter(p, state, note=""):
@@ -277,9 +277,9 @@ def cmd_adopt(a, flow):
     v = evolve.adopt(flow, a.hid, a.approved)
     save(flow)
     print(f"구조 버전 {v}를 적용했다. 진행 중인 계획은 시작할 때의 버전을 계속 쓴다.")
-    print("  하네스 커밋: git add .flow/config.toml .flow/history, git commit -m \"harness: "
+    print("  하네스 커밋: git add .gate/config.toml .gate/history, git commit -m \"harness: "
           f"{a.hid} 구조 변경\"")
-    print("  그다음 상태 파일과 제안서를 일반 커밋으로 남긴다: git add .flow/state.json .flow/proposals")
+    print("  그다음 상태 파일과 제안서를 일반 커밋으로 남긴다: git add .gate/state.json .gate/proposals")
 
 
 def main(argv=None):

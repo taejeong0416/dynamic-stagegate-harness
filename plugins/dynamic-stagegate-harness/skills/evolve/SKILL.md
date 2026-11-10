@@ -1,16 +1,16 @@
 ---
-name: flow-evolve
-description: flow 하네스의 구조(종류, 상태, 경로, 검사)를 프로젝트의 지금 모습과 진행 기록에 맞춰 다시 짜는 제안서를 쓰고, 검토와 사용자 승인을 거쳐 적용한다. SessionStart가 하네스 점검을 권했을 때, 프로젝트 단계나 목적이 바뀌었을 때, 같은 상태에서 자꾸 막히거나 형식만 채우는 상태가 보일 때, 사용자가 "하네스 점검", "구조 바꿔", "flow-evolve", "상태 추가", "단계 빼자"라고 할 때 쓴다.
+name: evolve
+description: stagegate 하네스의 구조(종류, 상태, 경로, 검사)를 프로젝트의 지금 모습과 진행 기록에 맞춰 다시 짜는 제안서를 쓰고, 검토와 사용자 승인을 거쳐 적용한다. SessionStart가 하네스 점검을 권했을 때, 프로젝트 단계나 목적이 바뀌었을 때, 같은 상태에서 자꾸 막히거나 형식만 채우는 상태가 보일 때, 사용자가 "하네스 점검", "구조 바꿔", "evolve", "상태 추가", "단계 빼자"라고 할 때 쓴다.
 ---
 
 # 하네스 구조 다시 짜기
 
-구조를 바꾸는 길은 제안서 하나뿐이다. `.flow/config.toml`은 guard가 직접 편집을 막는다.
+구조를 바꾸는 길은 제안서 하나뿐이다. `.gate/config.toml`은 guard가 직접 편집을 막는다.
 
 ## 1. 진단
 
-1. `python -X utf8 .flow/flow.py diagnose`를 돌린다. 상태별 기록, hook이 막은 기록, 저장소 변화가 나온다.
-2. `.flow/PROFILE.md`(목적), `python -X utf8 .flow/flow.py describe`(지금 구조), `.flow/library/*.toml`(빌려 올 상태와 절)을 읽는다.
+1. `python -X utf8 .gate/gate.py diagnose`를 돌린다. 상태별 기록, hook이 막은 기록, 저장소 변화가 나온다.
+2. `.gate/PROFILE.md`(목적), `python -X utf8 .gate/gate.py describe`(지금 구조), `.gate/library/*.toml`(빌려 올 상태와 절)을 읽는다.
 3. 아래 신호를 찾는다. 신호마다 진단 자료의 수치나 파일을 근거로 적어 둔다.
 
 | 신호 | 진단 자료에서 보는 곳 | 흔한 조정 |
@@ -26,7 +26,7 @@ description: flow 하네스의 구조(종류, 상태, 경로, 검사)를 프로�
 
 ## 2. 제안서
 
-다음 번호로 `.flow/proposals/H###.md`를 쓴다(H001부터, 이미 있는 번호 다음).
+다음 번호로 `.gate/proposals/H###.md`를 쓴다(H001부터, 이미 있는 번호 다음).
 
 ````
 # H### <한 줄 요약>
@@ -57,15 +57,15 @@ version = <지금 버전 + 1>
 
 ## 3. 검사와 승인
 
-1. `python -X utf8 .flow/flow.py check-proposal H###`로 lint와 지난 계획 재생을 본다. 문제가 나오면 제안서를 고친다.
+1. `python -X utf8 .gate/gate.py check-proposal H###`로 lint와 지난 계획 재생을 본다. 문제가 나오면 제안서를 고친다.
 2. 통과하면 `check-proposal H### --review`로 검토자를 부른다(묻지 않고 한다). FAIL이면 이유를 보고 제안서를 고친다.
 3. 사용자에게 보인다. "바꾸는 것" 표, 새 경로(H###.diag.md의 "새 구조 경로"), 영향받는 진행 중인 계획을 보여 주고 승인을 묻는다. 묻는 것으로 턴을 끝낸다.
 4. 사용자가 승인하면 그 턴에 승인 문장을 그대로 넣어 적용한다.
    ```
-   python -X utf8 .flow/flow.py adopt H### --approved "<사용자가 쓴 승인 문장>"
+   python -X utf8 .gate/gate.py adopt H### --approved "<사용자가 쓴 승인 문장>"
    ```
    guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. 사용자가 일부만 승인하면 제안서를 고쳐 1부터 다시 한다.
-5. 출력된 순서대로 커밋한다. 하네스 커밋(`.flow/config.toml`, `.flow/history`)을 먼저 하고, 상태 파일과 제안서는 따로 커밋한다.
+5. 출력된 순서대로 커밋한다. 하네스 커밋(`.gate/config.toml`, `.gate/history`)을 먼저 하고, 상태 파일과 제안서는 따로 커밋한다.
 
 ## 하지 않는 것
 

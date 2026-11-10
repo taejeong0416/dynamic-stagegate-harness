@@ -17,13 +17,13 @@ from pathlib import Path
 STOP_CAP = 5  # 근거 없이 정한 값. Claude Code는 도구 호출 없이 8번 막히면 강제로 끝낸다
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 ARG = r"(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)"
-CLI_CMD = re.compile(r"^\s*(python3?|py)(\s+-X\s+utf8)?\s+\.flow/flow\.py(\s+[^;&|<>`$\n]*)?$")
+CLI_CMD = re.compile(r"^\s*(python3?|py)(\s+-X\s+utf8)?\s+\.gate/gate\.py(\s+[^;&|<>`$\n]*)?$")
 CD = re.compile(r"^\s*cd\s+" + ARG + r"\s*(?:&&|;)\s*")  # 앞에 붙는 폴더 이동 하나
 READ_SEG = re.compile(r"^\s*(cat|type|head|tail|ls|dir|wc|grep|rg|findstr|Get-Content|Get-ChildItem"
                       r"|Select-String|Measure-Object|Select-Object"
                       r"|git(?:\s+-C\s+" + ARG + r")?\s+(add|commit|diff|log|show|status|checkout|restore|blame|grep))\b"
                       r"[^;&|<>`$\n]*$")
-STATE_TOUCH = re.compile(r"\.flow/state\.json|\.flow/flow\.py|import\s+flowkit|from\s+flowkit|flow\.lock")
+STATE_TOUCH = re.compile(r"\.gate/state\.json|\.gate/gate\.py|import\s+gatekit|from\s+gatekit|gate\.lock")
 HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"
                       r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
 ADOPT = re.compile(r"\badopt\s+(\S+)\s+--approved\s+(?:\"([^\"]*)\"|'([^']*)')")
@@ -71,12 +71,12 @@ def guard(inp):
     if tool in EDIT_TOOLS:
         path = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT) or ""
         if path == state_rel or path.startswith(".git/"):
-            deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .flow/flow.py 명령으로만 바꾼다.")
+            deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다.")
         if is_protected(path):
-            deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .flow/proposals/H###.md에 제안서를 쓰고 "
-                 "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(flow-evolve skill).")
+            deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .gate/proposals/H###.md에 제안서를 쓰고 "
+                 "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(evolve skill).")
         if is_code(path) and not code_open(load()):
-            deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .flow/flow.py status로 상태를 보고, "
+            deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .gate/gate.py status로 상태를 보고, "
                  "계획을 시작하거나 next로 코드 상태까지 진행한다.")
         return
     if tool not in ("Bash", "PowerShell"):
@@ -85,8 +85,8 @@ def guard(inp):
     if HOOK_OFF.search(cmd):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
     if STATE_TOUCH.search(cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
-        deny("상태는 python -X utf8 .flow/flow.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
-    if CLI_CMD.match(cmd) and re.search(r"\.flow/flow\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만
+        deny("상태는 python -X utf8 .gate/gate.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
+    if CLI_CMD.match(cmd) and re.search(r"\.gate/gate\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만
         m = ADOPT.search(cmd)
         quote = " ".join((m.group(2) or m.group(3) or "").split()) if m else ""
         prompt = read_transcript(inp["transcript_path"], LAUNCH)["prompt"] if inp.get("transcript_path") else ""
@@ -105,15 +105,15 @@ def guard(inp):
             deny("커밋하지 않은 코드가 있어 서버 실행과 업로드를 막았다. 커밋한 뒤 다시 실행한다: "
                  + ", ".join(p for _, p in d[:8]))
         if LAUNCH.search(cmd) and not run_open(flow):
-            deny("실행 상태이고 flow run 기록(예상 종료 시각과 근거)이 있는 계획이 없어 서버 실행을 막았다. "
-                 "python -X utf8 .flow/flow.py run P### --eta HH:MM --basis \"...\"를 먼저 한다.")
+            deny("실행 상태이고 gate run 기록(예상 종료 시각과 근거)이 있는 계획이 없어 서버 실행을 막았다. "
+                 "python -X utf8 .gate/gate.py run P### --eta HH:MM --basis \"...\"를 먼저 한다.")
 
 
 def recoverable(inp, root):
     """하네스가 깨졌을 때도 허용하는 행동: 하네스 파일 편집, 읽기와 git 복구"""
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     if tool in EDIT_TOOLS:
-        return (rel(ti.get("file_path"), root) or "").startswith((".flow/", ".githooks/"))
+        return (rel(ti.get("file_path"), root) or "").startswith((".gate/", ".githooks/"))
     if tool in ("Bash", "PowerShell"):
         return is_read(ti.get("command", "").replace("\\", "/"))
     return True
@@ -153,7 +153,7 @@ def read_transcript(path, launch):
                 r = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT)
                 if r:
                     files.add(r)
-            elif x.get("type") == "tool_use" and ".flow/flow.py" in str(ti.get("command", "")).replace("\\", "/"):
+            elif x.get("type") == "tool_use" and ".gate/gate.py" in str(ti.get("command", "")).replace("\\", "/"):
                 found = set(re.findall(r"\b[A-Z]+\d{3}\b", ti["command"]))
                 cli_calls.add(x.get("id"))
             elif x.get("type") == "tool_result" and x.get("tool_use_id") in cli_calls:
@@ -199,7 +199,7 @@ def stop_problems(inp):
     flow = load()
     state_rel = STATE.relative_to(ROOT).as_posix()
     edited, edited_turn = set(t["edited"]), set(t["edited_turn"])
-    if t["own_turn"]:  # 이번 턴의 flow 명령이 쓴 상태 파일
+    if t["own_turn"]:  # 이번 턴의 gate 명령이 쓴 상태 파일
         edited.add(state_rel)
         edited_turn.add(state_rel)
 
@@ -218,7 +218,7 @@ def stop_problems(inp):
     if remote_on() and t["launched"] and not (re.search(r"(?<!\d)\d{1,2}:\d{2}(?!\d)", t["text"])
                                                and re.search(r"\d+\s*(분|시간)", t["text"])):
         problems.append("이번 턴에 서버 작업을 띄웠는데 답에 남은 시간과 끝나는 시각(예: 약 20분, 01:05쯤)이 없다.")
-    # 이번 턴에 flow 명령으로 다룬 계획, 결과 알림으로 시작한 턴이면 이 세션이 다룬 계획.
+    # 이번 턴에 gate 명령으로 다룬 계획, 결과 알림으로 시작한 턴이면 이 세션이 다룬 계획.
     # 일반 질문이나 부가 작업 턴은 계획 상태로 막지 않는다
     watch = t["own_turn"] | (t["own"] if t["notified"] else set())
     for pid in sorted(pid for pid in watch if pid in flow["plans"]):
@@ -228,14 +228,14 @@ def stop_problems(inp):
         st = state_def(p)
         if p["state"] in P["stop_states"]:
             problems.append(f"{pid} {p['title']}가 {p['state']}에 머물러 있다. 할 일을 하고 "
-                            f"python -X utf8 .flow/flow.py next {pid}로 넘긴다.")
+                            f"python -X utf8 .gate/gate.py next {pid}로 넘긴다.")
         elif st.get("run") and p.get("run") and (t["notified"] or eta_passed(p["run"])):
             spec = next((c for c in st.get("checks", []) if c["check"] == "results"), None)
             if spec:
                 s = sections((ROOT / p["plan"]).read_text(encoding="utf-8"))
                 ctx = {"pid": pid, "p": p, "s": s, "state": p["state"]}
                 if not results(ctx, spec):
-                    problems.append(f"{pid} {p['title']}의 결과 파일이 모두 생겼다. python -X utf8 .flow/flow.py next {pid}로 "
+                    problems.append(f"{pid} {p['title']}의 결과 파일이 모두 생겼다. python -X utf8 .gate/gate.py next {pid}로 "
                                     "넘어가 기록한다.")
     return problems, notes
 
@@ -244,8 +244,8 @@ def stop(inp):
     try:
         problems, notes = stop_problems(inp)
     except Exception as e:  # 막는 hook이라 내부 오류도 막는다
-        problems, notes = [f"stop hook 내부 오류: {e!r}. .flow/flowkit/hooks.py를 고친다."], []
-    counter = Path(tempfile.gettempdir()) / f"flowkit_stop_{inp.get('session_id', 'x')}.json"
+        problems, notes = [f"stop hook 내부 오류: {e!r}. .gate/gatekit/hooks.py를 고친다."], []
+    counter = Path(tempfile.gettempdir()) / f"gatekit_stop_{inp.get('session_id', 'x')}.json"
     n = json.loads(counter.read_text())["n"] if counter.exists() else 0
     if not problems:
         counter.unlink(missing_ok=True)
@@ -277,12 +277,12 @@ def context(event):
         if not active:
             return
         emit({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext":
-              "[flow] 진행 중인 계획: " + "; ".join(active) + ". 계획 작업이면 python -X utf8 .flow/flow.py status로 할 일을 "
+              "[gate] 진행 중인 계획: " + "; ".join(active) + ". 계획 작업이면 python -X utf8 .gate/gate.py status로 할 일을 "
               "보고 그 상태에 맞춰 하며, 다음 상태로는 next로만 넘어간다. 흐름과 관계없는 질문이나 부가 작업이면 이 목록을 "
               "따르지 않는다."}})
         return
-    parts = ["[flow] 진행 중인 계획과 지금 상태의 할 일이다(.flow/FLOW.md). 계획 작업은 이 상태에 맞춰 하고, 다음 상태로는 "
-             "python -X utf8 .flow/flow.py next로만 넘어간다. 흐름과 관계없는 질문이나 부가 작업이면 따르지 않는다.",
+    parts = ["[gate] 진행 중인 계획과 지금 상태의 할 일이다(.gate/GATE.md). 계획 작업은 이 상태에 맞춰 하고, 다음 상태로는 "
+             "python -X utf8 .gate/gate.py next로만 넘어간다. 흐름과 관계없는 질문이나 부가 작업이면 따르지 않는다.",
              status_text(flow)]
     if P["status_file"] and (ROOT / P["status_file"]).exists():
         text = (ROOT / P["status_file"]).read_text(encoding="utf-8")
@@ -292,7 +292,7 @@ def context(event):
     from .evolve import review_due
     why = review_due(flow)
     if why:
-        parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 flow-evolve skill로 "
+        parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 evolve skill로 "
                      "진단하고 구조 변경 제안서를 쓴다. 지금 요청이 급하면 그 일을 먼저 한다.")
     emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n\n".join(parts)}})
 
@@ -306,7 +306,7 @@ def main(event, root):
             raise
         except Exception as e:
             if not recoverable(inp, root):
-                deny(f"guard hook 내부 오류로 막았다: {e!r}. .flow/flowkit/나 .flow/config.toml을 고친다"
+                deny(f"guard hook 내부 오류로 막았다: {e!r}. .gate/gatekit/나 .gate/config.toml을 고친다"
                      "(하네스 편집과 읽기, git checkout, restore는 허용된다).")
     elif event == "stop":
         stop(inp)
@@ -314,4 +314,4 @@ def main(event, root):
         try:
             context(event)
         except Exception as e:  # 주입 hook은 막지 않는다
-            emit({"systemMessage": f"flow 주입 hook 오류: {e!r}"})
+            emit({"systemMessage": f"gate 주입 hook 오류: {e!r}"})

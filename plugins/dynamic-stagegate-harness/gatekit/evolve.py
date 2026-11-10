@@ -1,6 +1,6 @@
 """하네스 구조 점검: lint, describe, diagnose, 제안서 검사, adopt.
 
-구조를 바꾸는 길은 하나다. 에이전트가 .flow/proposals/H###.md에 새 config와 근거를 쓰고, check-proposal이 lint,
+구조를 바꾸는 길은 하나다. 에이전트가 .gate/proposals/H###.md에 새 config와 근거를 쓰고, check-proposal이 lint,
 지난 기록 재생, diff를 붙여 검토자에게 보이고, 사용자가 승인한 문장을 adopt --approved에 넣는다(guard가 그 문장이
 이번 턴 사용자 입력에 있는지 본다). 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다.
 """
@@ -13,12 +13,12 @@ import time
 from datetime import datetime
 
 from .checks import CHECKS, call_reviewer
-from .core import (CFG, CLOSED, FLOW_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
+from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
-PROPOSALS = FLOW_DIR / "proposals"
+PROPOSALS = GATE_DIR / "proposals"
 COND_KEYS = {"option", "changed", "max_files", "not", "any"}
-MUST_PROTECT = (".flow/config.toml", ".flow/history/", ".flow/flowkit/")
+MUST_PROTECT = (".gate/config.toml", ".gate/history/", ".gate/gatekit/")
 # 검사가 section을 주지 않을 때 쓰는 기본 절
 DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choice": "결정", "numbers": "값 근거"}
 
@@ -160,7 +160,7 @@ def diagnose(flow):
     since_ts, since_commit = hz.get("ts", 0), hz.get("commit") or ""
     lines = [f"# 하네스 진단 ({now()})", "",
              f"- 지금 구조 버전: {CFG['version']}, 마지막 adopt: {hz.get('adopted', '설치')} {hz.get('at', '')}",
-             f"- PROFILE.md: {'있음' if (FLOW_DIR / 'PROFILE.md').exists() else '없음'}", ""]
+             f"- PROFILE.md: {'있음' if (GATE_DIR / 'PROFILE.md').exists() else '없음'}", ""]
     stat = {}
     for pid, p in flow["plans"].items():
         cfg = cfg_for(p)
@@ -228,7 +228,7 @@ def diagnose(flow):
         lines.append("- 새로 생긴 파일(폴더별): " + (", ".join(f"{g} {n}개" for g, n in sorted(groups.items())) or "없음"))
         changed = changed_since(since_commit)
         outside = sorted(f for f in changed if not is_code(f) and not f.endswith((".md", ".json", ".lock", ".txt"))
-                         and not f.startswith((".flow/", ".githooks/")))
+                         and not f.startswith((".gate/", ".githooks/")))
         lines.append("- code 패턴 밖에서 바뀐 파일: " + (", ".join(outside[:20]) or "없음"))
     else:
         lines.append("- 기준 커밋이 없다")
@@ -269,7 +269,7 @@ def replay(flow, new):
     return out if len(out) > n0 else out + ["- 차이가 나는 계획 없음"]
 
 
-REVIEW = ("하네스 구조 변경 제안서 {path}를 검토한다. 지금 구조 .flow/config.toml, 목적 .flow/PROFILE.md(없으면 건너뛴다), "
+REVIEW = ("하네스 구조 변경 제안서 {path}를 검토한다. 지금 구조 .gate/config.toml, 목적 .gate/PROFILE.md(없으면 건너뛴다), "
           "진단과 검사 결과 {diag}를 읽는다. 다음을 찾는다. (1) 상태나 검사를 빼거나 약하게 하는데 '바꾸는 것' 표의 근거가 "
           "진단 자료의 수치나 PROFILE과 맞지 않거나 없는 것 (2) PROFILE의 목적과 어긋나는 변경 (3) 근거 없이 넣은 새 상태나 "
           "경로 (4) '진행 중인 계획' 절이 재생 결과와 다른 것.")
@@ -299,7 +299,7 @@ def check_proposal(flow, hid, allow_review):
         miss.append(f"새 구조의 version은 {CFG['version'] + 1}이어야 한다(지금 {CFG['version']})")
     problems = lint(new)
     miss += [f"lint: {x}" for x in problems]
-    cur = (FLOW_DIR / "config.toml").read_text(encoding="utf-8")
+    cur = (GATE_DIR / "config.toml").read_text(encoding="utf-8")
     diff = "".join(difflib.unified_diff(cur.splitlines(True), (raw + "\n").splitlines(True), "지금 config.toml",
                                         "새 구조"))
     diag = PROPOSALS / f"{hid}.diag.md"
@@ -335,10 +335,10 @@ def adopt(flow, hid, approved):
     new = parse_config(raw)
     if new["version"] != CFG["version"] + 1 or lint(new):
         raise SystemExit("새 구조의 version이나 lint가 맞지 않다. check-proposal을 다시 한다")
-    hist = FLOW_DIR / "history"
+    hist = GATE_DIR / "history"
     hist.mkdir(exist_ok=True)
-    shutil.copy2(FLOW_DIR / "config.toml", hist / f"v{CFG['version']}.toml")
-    (FLOW_DIR / "config.toml").write_text(raw.rstrip("\n") + "\n", encoding="utf-8")
+    shutil.copy2(GATE_DIR / "config.toml", hist / f"v{CFG['version']}.toml")
+    (GATE_DIR / "config.toml").write_text(raw.rstrip("\n") + "\n", encoding="utf-8")
     rec.update({"adopted": True, "approved": " ".join(approved.split()), "adopted_at": now()})
     flow["harness"] = {"version": new["version"], "adopted": hid, "at": now(), "ts": time.time(), "commit": head(),
                        "stage": flow.get("stage")}
@@ -358,6 +358,6 @@ def review_due(flow):
         why.append(f"마지막 구조 변경 뒤 hook이 {ev}번 막았다")
     if CFG["stages"] and hz.get("stage") != flow.get("stage"):
         why.append(f"프로젝트 단계가 {hz.get('stage')}에서 {flow.get('stage')}로 바뀌었다")
-    if not (FLOW_DIR / "PROFILE.md").exists():
+    if not (GATE_DIR / "PROFILE.md").exists():
         why.append("PROFILE.md(프로젝트 목적)가 없다")
     return why

@@ -1,13 +1,13 @@
 # agent preset: LLM 에이전트, 프롬프트, 도구 호출 개발
 # 동작을 바꾸기 전에 eval 케이스와 합격 기준을 먼저 커밋하고, 바꾼 뒤 같은 eval로 잰다.
-# 하네스 구조의 원본이다. 이 파일은 제안서와 flow adopt로만 바꾼다(.flow/FLOW.md).
+# 하네스 구조의 원본이다. 이 파일은 제안서와 gate adopt로만 바꾼다(.gate/GATE.md).
 version = 1
 
 [project]
 plans_dir = "plans"
 plan_prefix = "P"
 code = ["src/*", "agent/*", "prompts/*", "tools/*", "evals/*", "tests/*"]
-tracked = ["src", "agent", "prompts", "tools", "evals", "tests", "plans", "docs", ".flow", ".githooks"]
+tracked = ["src", "agent", "prompts", "tools", "evals", "tests", "plans", "docs", ".gate", ".githooks"]
 files_section = "변경 파일"
 unreviewed = ["평가 결과", "원인", "검증", "기록", "결정"]
 stop_states = ["RECORD", "REPLAN"]
@@ -151,7 +151,7 @@ checks = [
 run = true
 sections = ["평가", "평가 결과"]
 todo = [
-  "eval 명령을 돌려 결과 파일을 새로 만든다. 오래 걸리면 flow run으로 예상 종료 시각을 적는다.",
+  "eval 명령을 돌려 결과 파일을 새로 만든다. 오래 걸리면 gate run으로 예상 종료 시각을 적는다.",
   "\"평가 결과\" 표에 케이스 묶음마다 바꾸기 전 점수와 바꾼 뒤 점수를 쓴다.",
 ]
 checks = [

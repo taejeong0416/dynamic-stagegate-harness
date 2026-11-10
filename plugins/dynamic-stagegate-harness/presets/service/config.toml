@@ -1,6 +1,6 @@
 # service preset: 웹 서비스와 앱 개발
 # 하네스 구조의 원본이다. 종류(kinds)는 상태 순서와 조건부 경로(when)를, 상태(states)는 할 일, 검사, 쓰는 절을,
-# 절(sections)은 계획 틀에 들어갈 내용을 정한다. 이 파일은 제안서와 flow adopt로만 바꾼다(.flow/FLOW.md).
+# 절(sections)은 계획 틀에 들어갈 내용을 정한다. 이 파일은 제안서와 gate adopt로만 바꾼다(.gate/GATE.md).
 version = 1
 
 [project]
@@ -9,7 +9,7 @@ plan_prefix = "P"
 # 고칠 때 코드 상태(code = true)인 계획이 있어야 하는 파일. *는 /도 넘는다
 code = ["src/*", "app/*", "lib/*", "server/*", "client/*", "packages/*", "tests/*", "test/*"]
 # stop hook이 이 세션이 고친 파일의 미커밋 변경을 보는 폴더
-tracked = ["src", "app", "lib", "server", "client", "packages", "tests", "test", "plans", "docs", ".flow", ".githooks"]
+tracked = ["src", "app", "lib", "server", "client", "packages", "tests", "test", "plans", "docs", ".gate", ".githooks"]
 files_section = "변경 파일"
 unreviewed = ["테스트 결과", "원인", "검증", "기록"]
 # 이번 턴에 다룬 계획이 이 상태에 있으면 멈추지 못한다

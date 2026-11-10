@@ -1,14 +1,14 @@
 # ml preset: 대회와 연구 실험
 # 실험 기록은 experiments/log.csv(첫 칸 실험 번호 E###), 접근법 목록은 progress/ideas.md,
 # 현재 상태는 progress/status.md, 결정은 progress/decisions.md에 둔다.
-# 하네스 구조의 원본이다. 이 파일은 제안서와 flow adopt로만 바꾼다(.flow/FLOW.md).
+# 하네스 구조의 원본이다. 이 파일은 제안서와 gate adopt로만 바꾼다(.gate/GATE.md).
 version = 1
 
 [project]
 plans_dir = "experiments/plans"
 plan_prefix = "P"
 code = ["experiments/*.py", "src/*.py", "submissions/*.py"]
-tracked = ["progress", "experiments", "src", "submissions", "docs", ".flow", ".githooks"]
+tracked = ["progress", "experiments", "src", "submissions", "docs", ".gate", ".githooks"]
 files_section = "행 조건 대조표"
 unreviewed = ["값 근거", "표본 실행", "기록", "결정"]
 stop_states = ["RECORD", "REPLAN"]
@@ -17,7 +17,7 @@ decisions_file = "progress/decisions.md"
 status_file = "progress/status.md"
 status_sections = ["단계", "열린 질문", "다음에 볼 것"]
 
-# 학습 서버. host를 채우면 ssh 실행과 업로드를 flow run 기록과 커밋으로 막고, 로컬에 없는 결과 파일을 서버에서 찾는다
+# 학습 서버. host를 채우면 ssh 실행과 업로드를 gate run 기록과 커밋으로 막고, 로컬에 없는 결과 파일을 서버에서 찾는다
 [remote]
 host = ""
 port = 22
@@ -225,7 +225,7 @@ checks = [
 sections = ["실행 계획"]
 run = true
 todo = [
-  "flow run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.",
+  "gate run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.",
   "답에 남은 시간과 끝나는 시각을 쓴다.",
   "결과가 나오면 next로 RECORD에 들어간다.",
 ]
