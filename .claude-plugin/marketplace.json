@@ -1,0 +1,11 @@
+{
+  "name": "flow-harness",
+  "owner": {"name": "taejeong0416"},
+  "plugins": [
+    {
+      "name": "flow-harness",
+      "source": "./plugins/flow-harness",
+      "description": "작업을 상태 기계로 진행시키는 하네스(ml, agent, service preset)"
+    }
+  ]
+}

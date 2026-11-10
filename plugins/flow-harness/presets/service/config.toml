@@ -1,0 +1,128 @@
+# service preset: 웹 서비스와 앱 개발
+# 상태별 할 일(todo)과 넘어가는 조건(checks)의 원본이다. 검사 이름은 .flow/flowkit/checks.py에 있다.
+
+[project]
+plans_dir = "plans"
+plan_prefix = "P"
+# 고칠 때 코드 상태(code = true)인 계획이 있어야 하는 파일. *는 /도 넘는다
+code = ["src/*", "app/*", "lib/*", "server/*", "client/*", "packages/*", "tests/*", "test/*"]
+# stop hook이 이 세션이 고친 파일의 미커밋 변경을 보는 폴더
+tracked = ["src", "app", "lib", "server", "client", "packages", "tests", "test", "plans", "docs", ".flow", ".githooks"]
+files_section = "변경 파일"
+unreviewed = ["테스트 결과", "원인", "검증", "기록"]
+# 이 세션이 다룬 계획이 이 상태에 있으면 멈추지 못한다
+stop_states = ["RECORD"]
+max_visits = 3
+
+[review]
+tools = "Read,Grep,Glob"
+
+[kinds.feature]
+states = ["SPEC", "PLAN", "IMPLEMENT", "TEST", "RECORD"]
+template = "templates/feature.md"
+
+[kinds.bugfix]
+states = ["REPRO", "FIX", "VERIFY", "RECORD"]
+template = "templates/bugfix.md"
+
+[kinds.refactor]
+states = ["PLAN", "IMPLEMENT", "TEST", "RECORD"]
+template = "templates/refactor.md"
+
+[kinds.chore]
+states = ["IMPLEMENT", "RECORD"]
+template = "templates/chore.md"
+
+[states.SPEC]
+todo = [
+  "\"요구사항\" 절에 사용자가 보는 동작을 쓴다.",
+  "\"수용 기준\" 표에 기준마다 확인 방법(테스트, 화면 확인, 명령)을 쓴다.",
+  "\"범위 밖\" 절에 이번에 하지 않을 것을 쓴다.",
+  "next P### --review로 검토자를 부른다.",
+]
+checks = [
+  {check = "filled", section = "요구사항"},
+  {check = "table", section = "수용 기준"},
+  {check = "filled", section = "범위 밖"},
+]
+review = "{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다. 저장소의 관련 코드와 docs/를 읽는다. 다음을 찾는다. (1) 확인 방법이 없거나 주관적인 수용 기준 (2) 요구사항에 있는데 수용 기준이 없는 동작 (3) 기존 코드의 동작과 어긋나는 요구사항."
+
+[states.PLAN]
+todo = [
+  "\"변경 파일\" 표에 고칠 파일과 바꿀 내용을 쓴다. 테스트 파일도 쓴다.",
+  "\"테스트 계획\"에 테스트 명령과 수용 기준별 테스트(refactor는 보존할 동작)를 쓴다.",
+  "\"위험\" 절에 깨질 수 있는 곳을 쓴다.",
+  "next P### --review로 검토자를 부른다.",
+]
+checks = [
+  {check = "files_listed"},
+  {check = "table", section = "변경 파일"},
+  {check = "filled", section = "테스트 계획", items = ["테스트 명령"]},
+]
+review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 코드와 테스트를 읽는다. 다음을 찾는다. (1) 요구사항이나 목표 중 '변경 파일' 표가 다루지 않는 것 (2) 수용 기준이나 보존할 동작 중 '테스트 계획'이 확인하지 않는 것 (3) 기존 구조와 어긋나는 설계 (4) '위험'에 빠진 영향 범위."
+
+[states.IMPLEMENT]
+code = true
+todo = [
+  "\"변경 파일\" 표대로 코드와 테스트를 쓴다. 표에 없는 파일이 필요하면 표에 더한다(pre-commit이 표에 없는 코드 파일을 막는다).",
+  "코드를 커밋한다.",
+]
+checks = [
+  {check = "files_listed"},
+  {check = "clean"},
+  {check = "files_changed"},
+]
+
+[states.TEST]
+todo = [
+  "\"테스트 계획\"의 테스트 명령을 돌린다.",
+  "\"테스트 결과\" 표에 기준마다 결과를 쓴다.",
+]
+checks = [
+  {check = "clean"},
+  {check = "command", section = "테스트 계획", item = "테스트 명령"},
+  {check = "table", section = "테스트 결과"},
+]
+
+[states.REPRO]
+code = true
+todo = [
+  "\"재현\" 절에 증상과 재현 명령을 쓴다. 재현 명령은 지금 실패해야 한다.",
+  "재현 테스트를 쓰고 \"변경 파일\" 표에 넣은 뒤 커밋한다.",
+]
+checks = [
+  {check = "filled", section = "재현", items = ["증상", "재현 명령"]},
+  {check = "clean"},
+  {check = "command", section = "재현", item = "재현 명령", expect = "fail"},
+]
+
+[states.FIX]
+code = true
+todo = [
+  "\"원인\" 절에 원인과 고친 위치를 쓴다.",
+  "고치고 커밋한다. 재현 명령이 통과해야 넘어간다.",
+]
+checks = [
+  {check = "filled", section = "원인"},
+  {check = "clean"},
+  {check = "files_changed", any = true},
+  {check = "command", section = "재현", item = "재현 명령"},
+]
+
+[states.VERIFY]
+todo = [
+  "\"검증\" 절의 전체 테스트 명령을 돌리고 결과를 쓴다.",
+]
+checks = [
+  {check = "filled", section = "검증", items = ["테스트 명령", "결과"]},
+  {check = "command", section = "검증", item = "테스트 명령"},
+]
+
+[states.RECORD]
+todo = [
+  "\"기록\" 절에 바뀐 동작, 문서 영향, 남은 일을 쓴다.",
+  "README, docs, CHANGELOG에 영향이 있으면 고쳐 커밋한다.",
+]
+checks = [
+  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"]},
+]

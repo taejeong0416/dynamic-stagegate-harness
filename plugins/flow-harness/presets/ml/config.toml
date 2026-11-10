@@ -1,0 +1,211 @@
+# ml preset: 대회와 연구 실험
+# 실험 기록은 experiments/log.csv(첫 칸 실험 번호 E###), 접근법 목록은 progress/ideas.md,
+# 현재 상태는 progress/status.md, 결정은 progress/decisions.md에 둔다.
+# 상태별 할 일(todo)과 넘어가는 조건(checks)의 원본이다. 검사 이름은 .flow/flowkit/checks.py에 있다.
+
+[project]
+plans_dir = "experiments/plans"
+plan_prefix = "P"
+code = ["experiments/*.py", "src/*.py", "submissions/*.py"]
+tracked = ["progress", "experiments", "src", "submissions", "docs", ".flow", ".githooks"]
+files_section = "행 조건 대조표"
+unreviewed = ["값 근거", "표본 실행", "기록", "결정"]
+stop_states = ["RECORD", "REPLAN"]
+max_visits = 3
+decisions_file = "progress/decisions.md"
+status_file = "progress/status.md"
+status_sections = ["단계", "열린 질문", "다음에 볼 것"]
+
+# 학습 서버. host를 채우면 ssh 실행과 업로드를 flow run 기록과 커밋으로 막고, 로컬에 없는 결과 파일을 서버에서 찾는다
+[remote]
+host = ""
+port = 22
+dir = "~/project"
+
+[review]
+tools = "Read,Grep,Glob"
+
+[[stages]]
+n = 0
+name = "준비, EDA"
+kinds = ["eda", "infra"]
+
+[[stages]]
+n = 1
+name = "baseline, 주력 확정"
+kinds = ["model", "tune", "eda", "infra"]
+
+[[stages]]
+n = 2
+name = "결합"
+kinds = ["new", "model", "tune", "eda", "infra"]
+
+[[stages]]
+n = 3
+name = "동결"
+kinds = ["freeze", "tune", "infra"]
+
+[[stages]]
+n = 4
+name = "재현, 최종 제출"
+kinds = ["repro", "infra"]
+
+[kinds.new]
+states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+template = "templates/plan.md"
+
+[kinds.model]
+states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+template = "templates/plan.md"
+
+[kinds.tune]
+states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+template = "templates/plan.md"
+
+[kinds.freeze]
+states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
+template = "templates/plan.md"
+
+[kinds.repro]
+states = ["PLAN", "RUN", "RECORD"]
+template = "templates/plan.md"
+
+[kinds.eda]
+states = ["QUESTION", "MEASURE", "RECORD", "REPLAN"]
+template = "templates/plan.md"
+
+[kinds.infra]
+states = ["IMPLEMENT", "RECORD"]
+template = "templates/plan.md"
+
+[states.RESEARCH]
+todo = [
+  "관련 문서(논문, 위키, 지난 대회 솔루션)를 읽고 \"조사\" 절 첫 표에 경로나 URL과 얻은 것을 쓴다.",
+  "같은 정보원을 다룬 지난 실험 번호를 둘째 표에 쓴다.",
+]
+checks = [
+  {check = "table", section = "조사", index = 0},
+  {check = "paths_exist", section = "조사"},
+  {check = "refs", section = "조사", pattern = "E\\d{3}", file = "experiments/log.csv"},
+]
+
+[states.IDEATE]
+todo = [
+  "정보원 하나를 여러 축(정보 표현, 넣는 자리, 범위, 조건부 적용, 기존 신호와 조합, 다른 정보원, 조사한 기법)으로 펼쳐 \"후보\" 표에 쓴다. 일부러 엉뚱한 후보도 넣는다.",
+  "새 후보는 progress/ideas.md에 행을 더한다.",
+  "뺄 후보는 선택 칸에 \"제외\"와 이유를 쓴다.",
+  "next P### --review로 검토자를 부른다.",
+]
+checks = [
+  {check = "table", section = "후보", min_rows = 3},
+]
+review = "{plan}의 '조사'와 '후보' 절을 검토한다. progress/ideas.md, experiments/log.csv, '조사' 절에 적힌 문서를 읽는다. 다음을 찾는다. (1) 후보가 없거나 형식만 채운 축 (2) 조사한 문서와 ideas.md에 있는데 후보에 없는 기법 (3) 지난 실험에서 기여가 없던 방식과 같은데 이유 없이 넣은 후보."
+
+[states.SELECT]
+todo = [
+  "후보마다 기대 이득, 비용, 겹치는 지난 실험 번호를 채운다.",
+  "이번에 잴 후보는 선택 칸에 \"선택\", 미룰 후보는 \"보류\"를 쓰고 이유를 쓴다. 싼 변형은 한 실험으로 묶는다.",
+  "\"고른 묶음\"에 함께 잴 후보와 묶은 이유를 쓴다.",
+]
+checks = [
+  {check = "filled", section = "후보", items = ["고른 묶음"]},
+  {check = "refs", section = "후보", pattern = "E\\d{3}", file = "experiments/log.csv"},
+]
+
+[states.PLAN]
+todo = [
+  "\"행 조건 대조표\"에 아이디어 행의 조건 하나마다 구현할 파일과 함수를 쓴다.",
+  "\"비교 기준\"에 기준 실험 번호와 판정 규칙(seed 수, 작은 차이의 처리)을 쓴다.",
+  "\"결과별 다음 행동\"에 수치 경계를 붙인 갈래를 두 개 이상 쓴다. 어느 갈래에도 맞지 않으면 \"예상 밖이면 RESEARCH부터\"로 둔다.",
+  "\"실행 계획\"에 실행 위치, 결과 파일 경로, 예상 소요 시간과 근거를 쓴다.",
+  "next P### --review로 검토자를 부른다.",
+]
+checks = [
+  {check = "table", section = "행 조건 대조표"},
+  {check = "files_listed", skip = ["repro"]},
+  {check = "filled", section = "비교 기준", items = ["기준 실험", "판정 규칙"]},
+  {check = "table", section = "결과별 다음 행동", min_rows = 2},
+  {check = "filled", section = "실행 계획", items = ["실행 위치", "결과 파일", "예상 소요 시간과 근거"]},
+  {check = "refs", section = "비교 기준", pattern = "E\\d{3}", file = "experiments/log.csv"},
+]
+review = "{plan}의 계획을 검토한다. progress/ideas.md, progress/decisions.md, progress/status.md, experiments/log.csv를 읽는다. 다음을 찾는다. (1) 아이디어 행 문장의 조건 중 '행 조건 대조표'에 없는 것 (2) decisions.md의 결정과 어긋나는 설정 (3) status.md 계획과 맞지 않는 '결과별 다음 행동' (4) 근거가 없는데 근거 있는 것처럼 적은 값."
+
+[states.IMPLEMENT]
+code = true
+todo = [
+  "행 조건 대조표대로 코드를 쓴다.",
+  "코드에 넣은 숫자 값(0과 1 제외)을 \"값 근거\" 표에 모두 쓴다. 값 칸에는 숫자 하나만 쓰고, 근거가 없으면 \"근거 없이 정한 값\"으로 쓴다.",
+  "작은 표본으로 끝까지 돌려 보고, 명령, 커밋, 결과 요약을 \"표본 실행\" 절에 쓴다.",
+  "코드와 계획 파일을 커밋한다.",
+]
+checks = [
+  {check = "files_listed"},
+  {check = "clean"},
+  {check = "files_changed"},
+  {check = "numbers", section = "값 근거"},
+  {check = "sample", section = "표본 실행", skip = ["infra"]},
+  {check = "reviewed", state = "PLAN", skip = ["infra"]},
+]
+
+[states.RUN]
+run = true
+todo = [
+  "flow run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.",
+  "답에 남은 시간과 끝나는 시각을 쓴다.",
+  "결과가 나오면 next로 RECORD에 들어간다.",
+]
+checks = [
+  {check = "run_record"},
+  {check = "results", section = "실행 계획", item = "결과 파일"},
+]
+
+[states.QUESTION]
+todo = [
+  "\"질문\" 절에 질문, 결과로 바뀌는 결정, 측정 방법을 쓴다.",
+  "\"결과별 다음 행동\"을 두 갈래 이상 쓴다.",
+  "측정 코드 파일을 \"행 조건 대조표\"에 쓴다.",
+]
+checks = [
+  {check = "filled", section = "질문", items = ["질문", "바뀌는 결정", "측정 방법"]},
+  {check = "table", section = "결과별 다음 행동", min_rows = 2},
+  {check = "files_listed"},
+]
+
+[states.MEASURE]
+code = true
+todo = [
+  "측정 코드를 커밋하고 돌린다.",
+  "코드에 넣은 숫자 값을 \"값 근거\" 표에 쓴다.",
+  "결과 파일 경로를 \"실행 계획\"에 쓴다.",
+]
+checks = [
+  {check = "clean"},
+  {check = "numbers", section = "값 근거"},
+  {check = "results", section = "실행 계획", item = "결과 파일"},
+]
+
+[states.RECORD]
+todo = [
+  "experiments/log.csv에 실험 행을 쓰고 \"기록\" 절의 log.csv 행에 그 실험 번호를 쓴다.",
+  "progress/ideas.md 행의 상태를 결과에 맞게 고치고 실험 번호를 쓴다.",
+  "결과가 일반 원칙과 어긋나는지 \"기록\" 절에 쓴다.",
+  "답에 \"기록\" 절 내용을 옮겨 쓴다.",
+]
+checks = [
+  {check = "refs", section = "기록", pattern = "E\\d{3}", file = "experiments/log.csv", required = true, skip = ["eda", "infra"]},
+  {check = "refs", section = "기록", pattern = "E\\d{3}", file = "progress/ideas.md", skip = ["eda", "infra"]},
+  {check = "filled", section = "기록", items = ["일반 원칙과의 관계"], skip = ["infra"]},
+]
+
+[states.REPLAN]
+todo = [
+  "\"결과별 다음 행동\"에서 결과에 맞는 갈래를 골라 \"결정\" 절에 쓴다.",
+  "어느 갈래에도 맞지 않으면 \"고른 갈래\"에 \"예상 밖\"을 쓰고 start --from P###로 새 계획을 RESEARCH에서 시작한다.",
+  "progress/status.md \"다음에 볼 것\"에 주는 영향을 쓰고 이 계획 번호를 적어 커밋한다.",
+  "답에 \"결정\" 절 내용을 옮겨 쓴다.",
+]
+checks = [
+  {check = "filled", section = "결정", items = ["고른 갈래", "status.md 영향"]},
+  {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖"},
+  {check = "commit_since", path = "progress/status.md", mention = true},
+]

@@ -1,0 +1,246 @@
+"""Claude Code hook. 플러그인의 hooks/run.py가 이벤트 이름을 넘겨 부른다.
+
+guard(PreToolUse): 상태에 맞지 않는 행동을 막는다. 내부 예외가 나면 막되, 하네스 편집과 읽기, git 복구는 허용한다.
+stop(Stop): 이 세션이 고친 파일의 미커밋 변경, 이 세션이 다룬 계획이 멈추면 안 되는 상태에 있을 때 막는다.
+  여러 세션이 한 저장소에서 같이 일해도 다른 세션의 작업으로 막지 않는다. 5번 연속 막으면 통과시킨다.
+session, prompt(SessionStart, UserPromptSubmit): 진행 중인 계획과 할 일을 넣는다. 예외가 나도 통과한다.
+"""
+import json
+import re
+import sys
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+
+STOP_CAP = 5  # 근거 없이 정한 값. Claude Code는 도구 호출 없이 8번 막히면 강제로 끝낸다
+EDIT_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+ARG = r"(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)"
+CLI_CMD = re.compile(r"^\s*(python3?|py)(\s+-X\s+utf8)?\s+\.flow/flow\.py(\s+[^;&|<>`$\n]*)?$")
+READ_CMD = re.compile(r"^\s*(?:cd\s+" + ARG + r"\s*(?:&&|;)\s*)?"
+                      r"(cat|type|head|tail|ls|dir|wc|Get-Content|Get-ChildItem"
+                      r"|git(?:\s+-C\s+" + ARG + r")?\s+(add|commit|diff|log|show|status|checkout|restore))\b"
+                      r"[^;&|<>`$\n]*$")
+STATE_TOUCH = re.compile(r"\.flow/state\.json|\.flow/flow\.py|import\s+flowkit|from\s+flowkit|flow\.lock")
+HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"
+                      r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
+SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item)"
+                         r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
+
+
+def emit(obj):
+    print(json.dumps(obj, ensure_ascii=False))
+
+
+def deny(reason):
+    emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                 "permissionDecisionReason": reason}})
+    sys.exit(0)
+
+
+def rel(path, root):
+    try:
+        return Path(path).resolve().relative_to(root).as_posix()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+# guard
+
+def guard(inp):
+    from .core import ROOT, STATE, code_open, dirty_code, is_code, is_harness, load, remote_on, run_open, LAUNCH, UPLOAD
+    tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
+    state_rel = STATE.relative_to(ROOT).as_posix()
+    if tool in EDIT_TOOLS:
+        path = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT) or ""
+        if path == state_rel or path.startswith(".git/"):
+            deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .flow/flow.py 명령으로만 바꾼다.")
+        if is_code(path) and not code_open(load()):
+            deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .flow/flow.py status로 상태를 보고, "
+                 "계획을 시작하거나 next로 코드 상태까지 진행한다.")
+        return
+    if tool not in ("Bash", "PowerShell"):
+        return
+    cmd = ti.get("command", "").replace("\\", "/")
+    if HOOK_OFF.search(cmd):
+        deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
+    if STATE_TOUCH.search(cmd) and not (CLI_CMD.match(cmd) or READ_CMD.match(cmd)):
+        deny("상태는 python -X utf8 .flow/flow.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
+    flow = load()
+    for m in SHELL_WRITE.finditer(cmd):
+        if is_code(m.group(2)) and not code_open(flow):
+            deny(f"코드를 고치는 상태인 계획이 없어 셸로 {m.group(2)}를 쓰는 것을 막았다.")
+    if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd)):
+        d = dirty_code()
+        if d:
+            deny("커밋하지 않은 코드가 있어 서버 실행과 업로드를 막았다. 커밋한 뒤 다시 실행한다: "
+                 + ", ".join(p for _, p in d[:8]))
+        if LAUNCH.search(cmd) and not run_open(flow):
+            deny("실행 상태이고 flow run 기록(예상 종료 시각과 근거)이 있는 계획이 없어 서버 실행을 막았다. "
+                 "python -X utf8 .flow/flow.py run P### --eta HH:MM --basis \"...\"를 먼저 한다.")
+
+
+def recoverable(inp, root):
+    """하네스가 깨졌을 때도 허용하는 행동: 하네스 파일 편집, 읽기와 git 복구"""
+    tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
+    if tool in EDIT_TOOLS:
+        return (rel(ti.get("file_path"), root) or "").startswith((".flow/", ".githooks/"))
+    if tool in ("Bash", "PowerShell"):
+        return bool(READ_CMD.match(ti.get("command", "").replace("\\", "/")))
+    return True
+
+
+# stop
+
+def read_transcript(path, launch):
+    from .core import ROOT
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            d = json.loads(line)
+            if d.get("type") in ("user", "assistant") and not d.get("isSidechain"):
+                rows.append(d)
+
+    def text_of(d):
+        c = d["message"]["content"]
+        return c if isinstance(c, str) else "\n".join(x.get("text", "") for x in c if x.get("type") == "text")
+
+    def is_prompt(d):
+        c = d["message"]["content"]
+        return d["type"] == "user" and (isinstance(c, str) or not any(x.get("type") == "tool_result" for x in c)) \
+            and not text_of(d).startswith("Stop hook feedback")
+
+    prompts = [i for i, d in enumerate(rows) if is_prompt(d)]
+    start = prompts[-1] if prompts else 0
+    own, edited, cli_calls = set(), set(), set()
+    for d in rows:
+        c = d["message"]["content"]
+        if isinstance(c, str):
+            continue
+        for x in c:
+            ti = x.get("input", {}) if x.get("type") == "tool_use" else {}
+            if x.get("type") == "tool_use" and x.get("name") in EDIT_TOOLS:
+                r = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT)
+                if r:
+                    edited.add(r)
+            elif x.get("type") == "tool_use" and ".flow/flow.py" in str(ti.get("command", "")).replace("\\", "/"):
+                own |= set(re.findall(r"\b[A-Z]+\d{3}\b", ti["command"]))
+                cli_calls.add(x.get("id"))
+            elif x.get("type") == "tool_result" and x.get("tool_use_id") in cli_calls:
+                body = x.get("content")
+                body = body if isinstance(body, str) else " ".join(y.get("text", "") for y in body or []
+                                                                   if isinstance(y, dict))
+                own |= set(re.findall(r"^([A-Z]+\d{3}) ", body, re.M))  # start가 출력한 새 번호
+    launched, text = False, []
+    for d in rows[start:]:
+        c = d["message"]["content"]
+        if d["type"] != "assistant" or isinstance(c, str):
+            continue
+        for x in c:
+            if x.get("type") == "tool_use" and x.get("name") in ("Bash", "PowerShell") \
+                    and launch.search(x["input"].get("command", "").replace("\\", "/")):
+                launched = True
+            elif x.get("type") == "text":
+                text.append(x["text"])
+    prompt = " ".join(text_of(rows[start]).split()) if rows else ""
+    notified = "<task-notification>" in prompt
+    return {"own": own, "edited": edited, "launched": launched, "text": "\n".join(text), "prompt": prompt,
+            "notified": notified}
+
+
+def eta_passed(run):
+    start = datetime.fromisoformat(run["at"])
+    h, m = map(int, run["eta"].split(":"))
+    eta = start.replace(hour=h, minute=m)
+    if eta < start:
+        eta += timedelta(days=1)
+    return datetime.now() >= eta
+
+
+def stop_problems(inp):
+    from .core import CFG, P, ROOT, STATE, dirty, load, remote_on, sections, LAUNCH
+    from .checks import results
+    t = read_transcript(inp["transcript_path"], LAUNCH)
+    flow = load()
+    own = {pid for pid in t["own"] if pid in flow["plans"]}
+    mine = set(t["edited"])
+    if own:  # flow 명령이 쓰는 파일
+        mine |= {STATE.relative_to(ROOT).as_posix()} | {flow["plans"][pid]["plan"] for pid in own}
+    problems = []
+    d = [f"{st} {path}" for st, path in dirty(*(P["tracked"] or ["."])) if path in mine]
+    if d:
+        problems.append("이 세션이 고친 파일에 커밋하지 않은 변경이 있다. 단위가 끝났으면 커밋하고, 진행 중이면 그 상태를 "
+                        "계획 파일에 적어 커밋한다.\n" + "\n".join(d))
+    if remote_on() and t["launched"] and not (re.search(r"(?<!\d)\d{1,2}:\d{2}(?!\d)", t["text"])
+                                               and re.search(r"\d+\s*(분|시간)", t["text"])):
+        problems.append("이번 턴에 서버 작업을 띄웠는데 답에 남은 시간과 끝나는 시각(예: 약 20분, 01:05쯤)이 없다.")
+    for pid in sorted(own):
+        p = flow["plans"][pid]
+        if p.get("hold") and p["hold"]["quote"] in t["prompt"]:
+            continue
+        st = CFG["states"].get(p["state"], {})
+        if p["state"] in P["stop_states"]:
+            problems.append(f"{pid} {p['title']}가 {p['state']}에 머물러 있다. 할 일을 하고 "
+                            f"python -X utf8 .flow/flow.py next {pid}로 넘긴다.")
+        elif st.get("run") and p.get("run") and (t["notified"] or eta_passed(p["run"])):
+            spec = next((c for c in st.get("checks", []) if c["check"] == "results"), None)
+            if spec:
+                s = sections((ROOT / p["plan"]).read_text(encoding="utf-8"))
+                ctx = {"pid": pid, "p": p, "s": s, "state": p["state"]}
+                if not results(ctx, spec):
+                    problems.append(f"{pid} {p['title']}의 결과 파일이 모두 생겼다. python -X utf8 .flow/flow.py next {pid}로 "
+                                    "넘어가 기록한다.")
+    return problems
+
+
+def stop(inp):
+    try:
+        problems = stop_problems(inp)
+    except Exception as e:  # 막는 hook이라 내부 오류도 막는다
+        problems = [f"stop hook 내부 오류: {e!r}. .flow/flowkit/hooks.py를 고친다."]
+    counter = Path(tempfile.gettempdir()) / f"flowkit_stop_{inp.get('session_id', 'x')}.json"
+    n = json.loads(counter.read_text())["n"] if counter.exists() else 0
+    if not problems:
+        counter.unlink(missing_ok=True)
+        return
+    if n + 1 >= STOP_CAP:
+        counter.unlink(missing_ok=True)
+        emit({"systemMessage": f"Stop hook이 {STOP_CAP}번 연속 막아 이번에는 통과시켰다. 남은 문제:\n" + "\n".join(problems)})
+        return
+    counter.write_text(json.dumps({"n": n + 1}))
+    emit({"decision": "block", "reason": "\n\n".join(problems)})
+
+
+# 주입
+
+def context(event):
+    from .cli import status_text
+    from .core import P, ROOT, load
+    parts = ["[flow] 진행 중인 계획과 지금 상태의 할 일이다(.flow/FLOW.md). 작업은 이 상태에 맞춰 하고, 다음 상태로는 "
+             "python -X utf8 .flow/flow.py next로만 넘어간다.", status_text(load())]
+    if event == "session" and P["status_file"] and (ROOT / P["status_file"]).exists():
+        text = (ROOT / P["status_file"]).read_text(encoding="utf-8")
+        for title in P["status_sections"]:
+            m = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+            parts.append(f"## {title}\n" + (m.group(1).strip() if m else "(없음)"))
+    name = "SessionStart" if event == "session" else "UserPromptSubmit"
+    emit({"hookSpecificOutput": {"hookEventName": name, "additionalContext": "\n\n".join(parts)}})
+
+
+def main(event, root):
+    inp = json.load(sys.stdin)
+    if event == "guard":
+        try:
+            guard(inp)
+        except SystemExit:
+            raise
+        except Exception as e:
+            if not recoverable(inp, root):
+                deny(f"guard hook 내부 오류로 막았다: {e!r}. .flow/flowkit/나 .flow/config.toml을 고친다"
+                     "(하네스 편집과 읽기, git checkout, restore는 허용된다).")
+    elif event == "stop":
+        stop(inp)
+    else:
+        try:
+            context(event)
+        except Exception as e:  # 주입 hook은 막지 않는다
+            emit({"systemMessage": f"flow 주입 hook 오류: {e!r}"})
