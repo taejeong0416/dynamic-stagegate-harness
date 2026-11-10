@@ -21,6 +21,9 @@ COND_KEYS = {"option", "changed", "max_files", "not", "any"}
 MUST_PROTECT = (".gate/config.toml", ".gate/history/", ".gate/gatekit/")
 # 검사가 section을 주지 않을 때 쓰는 기본 절
 DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choice": "결정", "numbers": "값 근거"}
+# 검사가 기본값 없이 읽는 키
+REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
+            "refs": ("section", "file", "pattern"), "commit_since": ("path",)}
 
 
 # lint
@@ -53,12 +56,11 @@ def lint(cfg):
         bad.append("종류가 없다")
     for kname, k in cfg["kinds"].items():
         states = k.get("states", [])
+        undefined = [s for s in states if s not in cfg["states"]]
         if not states:
             bad.append(f"{kname}: 상태가 없다")
-        for s in states:
-            if s not in cfg["states"]:
-                bad.append(f"{kname}: 상태 {s}가 [states]에 없다")
-        if bad:
+        bad += [f"{kname}: 상태 {s}가 [states]에 없다" for s in undefined]
+        if not states or undefined:
             continue
         opts = k.get("options", [])
         for s, cond in k.get("when", {}).items():
@@ -76,6 +78,10 @@ def lint(cfg):
                     bad.append(f"{s}: 검사 '{name}'가 없다(있는 것: {', '.join(CHECKS)})")
                     continue
                 if (c.get("only") and kname not in c["only"]) or kname in c.get("skip", []):
+                    continue
+                missing = [key for key in REQUIRED.get(name, ()) if not c.get(key)]
+                if missing:
+                    bad.append(f"{kname}/{s}: {name}에 필요한 키가 없다: {', '.join(missing)}")
                     continue
                 uses_files |= name in ("files_listed", "files_changed", "numbers", "sample")
                 sec = c.get("section", DEFAULT_SECTION.get(name))
@@ -171,10 +177,15 @@ def fmt_cond(c):
 
 # diagnose
 
+def _entered(p):
+    """history에서 건너뛴 기록을 뺀, 실제로 들어간 상태 기록"""
+    return [x for x in p.get("history", []) if not (len(x) > 3 and str(x[3]).startswith("skip"))]
+
+
 def _durations(p):
     """상태별 머문 분. history의 연속 기록 사이 시간"""
     out = {}
-    h = p.get("history", [])
+    h = _entered(p)
     for (s, at, *_), (_, at2, *_) in zip(h, h[1:]):
         try:
             m = (datetime.fromisoformat(at2) - datetime.fromisoformat(at)).total_seconds() / 60
@@ -191,24 +202,24 @@ def diagnose(flow):
              f"- 지금 구조 버전: {CFG['version']}, 마지막 adopt: {hz.get('adopted', '설치')} {hz.get('at', '')}",
              f"- PROFILE.md: {'있음' if (GATE_DIR / 'PROFILE.md').exists() else '없음'}", ""]
     stat = {}
-    for pid, p in flow["plans"].items():
+
+    def slot(kind, state):
+        return stat.setdefault((kind, state), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [],
+                                               "mins": [], "chars": []})
+
+    for p in flow["plans"].values():
         cfg = cfg_for(p)
         text = (ROOT / p["plan"]).read_text(encoding="utf-8") if (ROOT / p["plan"]).exists() else ""
         ss = sections(text)
         durs = _durations(p)
-        for s, at, commit, note in [tuple(x) + ("",) * (4 - len(x)) for x in p.get("history", [])]:
-            key = (p["kind"], s)
-            d = stat.setdefault(key, {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [], "mins": [],
-                                      "chars": []})
+        for x in _entered(p):
+            d = slot(p["kind"], x[0])
             d["visits"] += 1
-            d["back"] += str(note).startswith("back")
+            d["back"] += len(x) > 3 and str(x[3]).startswith("back")
         for s in p.get("skipped", []):
-            stat.setdefault((p["kind"], s), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [], "mins": [],
-                                             "chars": []})["skip"] += 1
+            slot(p["kind"], s)["skip"] += 1
         if p["state"] == "ABANDONED" and len(p.get("history", [])) >= 2:
-            last = p["history"][-2][0]
-            stat.setdefault((p["kind"], last), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [], "mins": [],
-                                                "chars": []})["abandon"] += 1
+            slot(p["kind"], p["history"][-2][0])["abandon"] += 1
         for s, rev in p.get("review", {}).items():
             if not rev.get("pass") and (p["kind"], s) in stat:
                 stat[(p["kind"], s)]["fail"] += rev.get("missing", [])[:2]
@@ -352,6 +363,8 @@ def check_proposal(flow, hid, allow_review):
 
 def adopt(flow, hid, approved):
     path = proposal_path(hid)
+    if not path.exists():
+        raise SystemExit(f"{path.relative_to(ROOT).as_posix()}가 없다")
     text = path.read_text(encoding="utf-8")
     rec = flow.get("proposals", {}).get(hid)
     h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

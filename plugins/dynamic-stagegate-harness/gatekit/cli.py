@@ -79,9 +79,9 @@ def cmd_start(a, flow):
     PLANS.mkdir(parents=True, exist_ok=True)
     plan = (PLANS / f"{pid}.md").relative_to(ROOT).as_posix()
     tpl = template_text(CFG, a.kind)
-    tpl = re.sub(r"^# \S+ 제목", f"# {pid} {a.title}", tpl, count=1, flags=re.M)
+    tpl = re.sub(r"^# \S+ 제목", lambda _: f"# {pid} {a.title}", tpl, count=1, flags=re.M)
     for k, v in (("종류", a.kind), ("선택", ", ".join(opts)), ("이어진 계획", a.from_ or "")):
-        tpl = re.sub(rf"^- {k}:.*$", f"- {k}: {v}".rstrip(), tpl, count=1, flags=re.M)
+        tpl = re.sub(rf"^- {k}:.*$", lambda _: f"- {k}: {v}".rstrip(), tpl, count=1, flags=re.M)
     (ROOT / plan).write_text(tpl, encoding="utf-8")
     p = {"title": a.title, "kind": a.kind, "from": a.from_, "plan": plan, "version": CFG["version"], "options": opts}
     first_rec = {"at": now(), "ts": time.time(), "commit": head()}
@@ -138,7 +138,7 @@ def cmd_run(a, flow):
     p = get_open(flow, a.pid)
     if not state_def(p).get("run"):
         sys.exit(f"{a.pid}의 {p['state']}는 실행 상태가 아니다(config.toml의 run = true)")
-    if not re.fullmatch(r"\d{1,2}:\d{2}", a.eta) or not a.basis.strip():
+    if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", a.eta) or not a.basis.strip():
         sys.exit("--eta HH:MM과 --basis 근거가 필요하다")
     p["run"] = {"eta": a.eta, "basis": a.basis, "at": now(), "ts": time.time(), "commit": head()}
     save(flow)
@@ -225,7 +225,7 @@ def cmd_pre_commit(a, flow):
 
 
 def cmd_commit_msg(a, flow):
-    msg = open(a.path, encoding="utf-8").read().strip()
+    msg = Path(a.path).read_text(encoding="utf-8").strip()
     files = [f for f in staged() if f]
     harness = [f for f in files if is_harness(f)]
     fail = []

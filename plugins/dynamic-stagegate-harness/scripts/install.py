@@ -9,6 +9,7 @@ git hook만 바꾼다. 커밋은 하지 않는다.
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -50,18 +51,24 @@ def copy_engine(gate_dir):
             shutil.copy2(p / "config.toml", lib / f"{p.name}.toml")
 
 
+def check_githooks(target):
+    """git hook을 쓸 수 없는 저장소면 아무것도 복사하기 전에 멈춘다"""
+    for name in GITHOOKS:
+        f = target / ".githooks" / name
+        if f.exists() and MARK not in f.read_text(encoding="utf-8"):
+            sys.exit(f"{f}가 이미 있고 stagegate 하네스 hook이 아니다. 내용을 합친 뒤 다시 실행한다")
+    cur = subprocess.run(["git", "config", "core.hooksPath"], cwd=target, capture_output=True, text=True).stdout.strip()
+    if cur and cur != ".githooks":
+        sys.exit(f"core.hooksPath가 이미 {cur}다. .githooks로 옮긴 뒤 다시 실행한다")
+
+
 def write_githooks(target):
     d = target / ".githooks"
     d.mkdir(exist_ok=True)
     for name, body in GITHOOKS.items():
         f = d / name
-        if f.exists() and MARK not in f.read_text(encoding="utf-8"):
-            sys.exit(f"{f}가 이미 있고 stagegate 하네스 hook이 아니다. 내용을 합친 뒤 다시 실행한다")
         f.write_text(body, encoding="utf-8", newline="\n")
         f.chmod(0o755)
-    cur = subprocess.run(["git", "config", "core.hooksPath"], cwd=target, capture_output=True, text=True).stdout.strip()
-    if cur and cur != ".githooks":
-        sys.exit(f"core.hooksPath가 이미 {cur}다. .githooks로 옮긴 뒤 다시 실행한다")
     subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=target, check=True)
 
 
@@ -81,8 +88,14 @@ def main():
     ap.add_argument("--update", action="store_true")
     a = ap.parse_args()
     target = Path(a.target).resolve()
-    if subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=target, capture_output=True).returncode != 0:
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=target, capture_output=True, text=True,
+                         encoding="utf-8")
+    if top.returncode != 0:
         sys.exit(f"{target}는 git 저장소가 아니다. git init을 먼저 한다")
+    if not os.path.samefile(top.stdout.strip(), target):
+        sys.exit(f"{target}는 git 저장소의 루트가 아니다. 엔진과 git hook이 저장소 루트를 기준으로 돌아서 "
+                 f"{top.stdout.strip()}에 설치한다")
+    check_githooks(target)
     gate_dir = target / ".gate"
     if a.update:
         if not (gate_dir / "config.toml").exists():

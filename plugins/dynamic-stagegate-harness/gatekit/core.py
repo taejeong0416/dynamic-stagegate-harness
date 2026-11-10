@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 import tokenize
@@ -153,6 +154,8 @@ def read_events(since=0):
         if e.get("ts", 0) >= since:
             out.append(e)
     return out
+
+
 STATE = ROOT / P["state_file"]
 PLANS = ROOT / P["plans_dir"]
 
@@ -187,7 +190,7 @@ def head():
 
 def changed_since(commit, *paths):
     out = git("diff", "--name-only", f"{commit}..HEAD", "--", *paths)
-    return set(out.split())
+    return set(out.splitlines())
 
 
 def dirty(*paths):
@@ -391,9 +394,9 @@ def result_status(paths, since):
             out.append(f"결과 파일이 없다: {x}")
     if remote:
         r = CFG["remote"]
-        script = (f"cd {r.get('dir', '~')} && for p in {' '.join(remote)}; do "
-                  f"t=$(stat -c %Y $p 2>/dev/null) || {{ echo MISSING $p; continue; }}; "
-                  f"[ $t -ge {int(since)} ] || echo OLD $p; done")
+        script = (f"cd {r.get('dir', '~')} && for p in {' '.join(map(shlex.quote, remote))}; do "
+                  f't=$(stat -c %Y "$p" 2>/dev/null) || {{ echo MISSING "$p"; continue; }}; '
+                  f'[ $t -ge {int(since)} ] || echo OLD "$p"; done')
         port = ["-p", str(r["port"])] if r.get("port") else []
         try:
             res = subprocess.run(["ssh", *port, "-o", "ConnectTimeout=8", "-o", "BatchMode=yes", r["host"], script],

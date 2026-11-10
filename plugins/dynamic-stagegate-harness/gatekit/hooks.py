@@ -84,7 +84,7 @@ def guard(inp):
     cmd = ti.get("command", "").replace("\\", "/")
     if HOOK_OFF.search(cmd):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
-    if STATE_TOUCH.search(cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
+    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
         deny("상태는 python -X utf8 .gate/gate.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
     if CLI_CMD.match(cmd) and re.search(r"\.gate/gate\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만
         m = ADOPT.search(cmd)
@@ -113,7 +113,8 @@ def recoverable(inp, root):
     """하네스가 깨졌을 때도 허용하는 행동: 하네스 파일 편집, 읽기와 git 복구"""
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     if tool in EDIT_TOOLS:
-        return (rel(ti.get("file_path"), root) or "").startswith((".gate/", ".githooks/"))
+        path = rel(ti.get("file_path") or ti.get("notebook_path"), root) or ""
+        return path.startswith((".gate/", ".githooks/"))
     if tool in ("Bash", "PowerShell"):
         return is_read(ti.get("command", "").replace("\\", "/"))
     return True

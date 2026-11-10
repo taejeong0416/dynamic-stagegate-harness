@@ -98,7 +98,7 @@ def results(ctx, spec):
     paths = bullets(ctx["s"].get(name, [])).get(item, "").replace(",", " ").split()
     if not paths:
         return [f"'{name}' 절의 '{item}'이 비었다"]
-    bad = [x for x in paths if x.startswith((CFG["project"]["plans_dir"], ".gate/"))]
+    bad = [x for x in paths if x.startswith((CFG["project"]["plans_dir"].rstrip("/") + "/", ".gate/"))]
     return [f"결과 파일로 계획 문서를 쓸 수 없다: {x}" for x in bad] or \
         result_status(paths, ctx["p"]["entered"][ctx["state"]]["ts"])
 
@@ -246,13 +246,15 @@ def call_reviewer(prompt, model=None):
     """읽기 도구만 쓰는 별도 Claude 호출. ({pass, missing}, {session, cost}). 호출이 실패하면 FAIL"""
     prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. "
                "파일을 고치지 않는다.")
+    err = ""
     try:
         r = subprocess.run([shutil.which("claude") or "claude", "-p", *(["--model", model] if model else []),
                             "--setting-sources", "local", "--tools", CFG["review"].get("tools", "Read,Grep,Glob"),
                             "--no-session-persistence", "--output-format", "json", "--json-schema", REVIEW_SCHEMA],
                            cwd=ROOT, input=prompt, capture_output=True, text=True, encoding="utf-8",
                            timeout=CFG["review"].get("timeout", 600), env=os.environ | {"GATE_REVIEW": "1"})
+        err = r.stderr.strip()[-200:]
         out = json.loads(r.stdout)
         return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd")}
     except Exception as e:
-        return {"pass": False, "missing": [f"검토 호출 실패: {e!r}"]}, {}
+        return {"pass": False, "missing": [f"검토 호출 실패: {e!r}" + (f" ({err})" if err else "")]}, {}
