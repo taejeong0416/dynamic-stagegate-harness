@@ -1,6 +1,8 @@
-"""설정, 상태 파일, 계획 파일 파싱, git 도우미.
+"""설정, 구조 버전, 상태 파일, 계획 파일 파싱, git 도우미.
 
 이 패키지는 프로젝트의 .flow/flowkit/에 복사되어 돈다. 프로젝트 루트는 .flow/의 부모다.
+구조(종류, 상태, 절, 조건부 경로)는 .flow/config.toml에 있고 version으로 센다. 바뀔 때마다 앞 버전은
+.flow/history/v<N>.toml에 남고, 계획은 시작할 때의 버전을 끝까지 쓴다.
 """
 import fnmatch
 import hashlib
@@ -25,8 +27,10 @@ DEFAULTS = {
     "plan_prefix": "P",
     "code": [],
     "tracked": [],
-    "harness": [".flow/flowkit/", ".flow/flow.py", ".flow/config.toml", ".flow/templates/", ".flow/FLOW.md",
-                ".githooks/"],
+    "harness": [".flow/flowkit/", ".flow/flow.py", ".flow/config.toml", ".flow/history/", ".flow/library/",
+                ".flow/FLOW.md", ".githooks/"],
+    # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 flow adopt로만 바꾼다
+    "protected": [".flow/config.toml", ".flow/history/", ".flow/flowkit/", ".flow/flow.py"],
     "harness_prefix": "harness:",
     "max_visits": 3,
     "files_section": "변경 파일",
@@ -36,23 +40,119 @@ DEFAULTS = {
     "status_file": "",
     "status_sections": [],
     "pre_commit": [],
+    "test": "",
+    # 하네스 점검 권장 기준. 근거 없이 정한 값
+    "review_every_plans": 5,
+    "review_every_events": 10,
 }
 
 
-def load_config():
-    raw = tomllib.loads((FLOW_DIR / "config.toml").read_text(encoding="utf-8"))
-    cfg = {"project": DEFAULTS | raw.get("project", {}), "kinds": raw.get("kinds", {}),
-           "states": raw.get("states", {}), "stages": raw.get("stages", []), "remote": raw.get("remote", {}),
-           "review": raw.get("review", {})}
-    for k, v in cfg["kinds"].items():
-        missing = [s for s in v["states"] if s not in cfg["states"]]
-        if missing:
-            raise SystemExit(f"config.toml: {k} 종류의 상태 {', '.join(missing)}가 [states]에 없다")
-    return cfg
+def parse_config(text):
+    raw = tomllib.loads(text)
+    return {"version": raw.get("version", 1), "project": DEFAULTS | raw.get("project", {}),
+            "kinds": raw.get("kinds", {}), "states": raw.get("states", {}), "sections": raw.get("sections", {}),
+            "stages": raw.get("stages", []), "remote": raw.get("remote", {}), "review": raw.get("review", {})}
 
 
-CFG = load_config()
+CFG = parse_config((FLOW_DIR / "config.toml").read_text(encoding="utf-8"))
 P = CFG["project"]
+_versions = {CFG["version"]: CFG}
+
+
+def cfg_for(p=None):
+    """계획이 시작할 때의 구조. 계획이 없으면 지금 구조"""
+    v = (p or {}).get("version", CFG["version"])
+    if v not in _versions:
+        f = FLOW_DIR / "history" / f"v{v}.toml"
+        _versions[v] = parse_config(f.read_text(encoding="utf-8")) if f.exists() else CFG
+    return _versions[v]
+
+
+def kind_states(cfg, kind):
+    return cfg["kinds"][kind]["states"]
+
+
+def template_text(cfg, kind):
+    """종류의 계획 틀. 머리 bullet 뒤에, 종류의 상태들이 쓰는 절을 상태 순서대로 한 번씩 놓는다"""
+    k = cfg["kinds"][kind]
+    names = []
+    for s in k["states"]:
+        for sec in cfg["states"][s].get("sections", []):
+            if sec not in names:
+                names.append(sec)
+    for sec in k.get("extra_sections", []):
+        if sec not in names:
+            names.append(sec)
+    out = ["# P000 제목", "", "- 종류:", "- 선택:", "- 이어진 계획:", ""]
+    for sec in names:
+        b = cfg["sections"].get(sec, {}).get("body", "").strip("\n")
+        out += [f"## {sec}", ""] + ([b, ""] if b else [])
+    return "\n".join(out)
+
+
+# 조건부 경로
+
+def cond_holds(cond, p, s, cfg):
+    """상태에 들를지 정하는 조건. 키를 모두 만족해야 한다.
+    option: start --with로 켠 선택, changed: 계획 시작 뒤 바뀐 파일이 패턴에 맞음(작업 트리 포함),
+    max_files: 계획이 적은 코드 파일 수가 n 이하, not: 아래 조건의 부정, any: 아래 조건 중 하나"""
+    for key, v in cond.items():
+        if key == "option":
+            ok = v in p.get("options", [])
+        elif key == "changed":
+            since = p.get("entered", {}).get("_start", {}).get("commit") or head()
+            files = changed_since(since) | {x for _, x in dirty()}
+            ok = any(match(f, v) for f in files)
+        elif key == "max_files":
+            ok = len(plan_files(s)) <= v
+        elif key == "not":
+            ok = not cond_holds(v, p, s, cfg)
+        elif key == "any":
+            ok = any(cond_holds(c, p, s, cfg) for c in v)
+        else:
+            raise SystemExit(f"config.toml: 알 수 없는 조건 키 '{key}'")
+        if not ok:
+            return False
+    return True
+
+
+def next_state(cfg, p, s, after):
+    """after 다음에 들를 상태. 조건이 맞지 않는 상태는 건너뛴다. (상태, 건너뛴 상태 목록)"""
+    order = kind_states(cfg, p["kind"])
+    when = cfg["kinds"][p["kind"]].get("when", {})
+    skipped = []
+    for st in order[order.index(after) + 1 if after else 0:]:
+        if st in when and not cond_holds(when[st], p, s, cfg):
+            skipped.append(st)
+            continue
+        return st, skipped
+    return "DONE", skipped
+
+
+# 이벤트 기록(하네스 점검 자료). git 폴더에 두어 커밋되지 않는다
+
+def log_event(kind, reason):
+    try:
+        with open(git_path("flow-events.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200]},
+                               ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def read_events(since=0):
+    f = git_path("flow-events.jsonl")
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text(encoding="utf-8").splitlines():
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if e.get("ts", 0) >= since:
+            out.append(e)
+    return out
 STATE = ROOT / P["state_file"]
 PLANS = ROOT / P["plans_dir"]
 
@@ -68,6 +168,10 @@ def is_harness(path):
 
 def is_code(path):
     return match(path, P["code"]) and not is_harness(path)
+
+
+def is_protected(path):
+    return match(path, P["protected"])
 
 
 # git
@@ -124,14 +228,16 @@ def first(p, state):
     return p.get("first", {}).get(state, p["entered"][state])
 
 
+def state_def(p):
+    return cfg_for(p)["states"].get(p["state"], {})
+
+
 def code_open(flow):
-    return any(CFG["states"].get(p["state"], {}).get("code") for p in flow["plans"].values()
-               if p["state"] not in CLOSED)
+    return any(state_def(p).get("code") for p in flow["plans"].values() if p["state"] not in CLOSED)
 
 
 def run_open(flow):
-    return any(CFG["states"].get(p["state"], {}).get("run") and p.get("run") for p in flow["plans"].values()
-               if p["state"] not in CLOSED)
+    return any(state_def(p).get("run") and p.get("run") for p in flow["plans"].values() if p["state"] not in CLOSED)
 
 
 # 계획 파일
@@ -187,13 +293,9 @@ def body(lines):
     return [l for l in text.splitlines() if l.strip()]
 
 
-def template_path(kind):
-    return FLOW_DIR / CFG["kinds"][kind]["template"]
-
-
 def structure_problems(p, text):
     """절 제목이 틀과 같은 순서로 한 번씩 있고, 틀의 bullet 항목이 모두 있는지"""
-    tpl = template_path(p["kind"]).read_text(encoding="utf-8")
+    tpl = template_text(cfg_for(p), p["kind"])
     want, got = headings(tpl), headings(text)
     miss = []
     if got != want:

@@ -1,6 +1,7 @@
 # agent preset: LLM 에이전트, 프롬프트, 도구 호출 개발
 # 동작을 바꾸기 전에 eval 케이스와 합격 기준을 먼저 커밋하고, 바꾼 뒤 같은 eval로 잰다.
-# 상태별 할 일(todo)과 넘어가는 조건(checks)의 원본이다. 검사 이름은 .flow/flowkit/checks.py에 있다.
+# 하네스 구조의 원본이다. 이 파일은 제안서와 flow adopt로만 바꾼다(.flow/FLOW.md).
+version = 1
 
 [project]
 plans_dir = "plans"
@@ -11,27 +12,83 @@ files_section = "변경 파일"
 unreviewed = ["평가 결과", "원인", "검증", "기록", "결정"]
 stop_states = ["RECORD", "REPLAN"]
 max_visits = 3
+test = ""
 
 [review]
 tools = "Read,Grep,Glob"
 
 [kinds.behavior]
 states = ["SPEC", "EVALSET", "IMPLEMENT", "EVAL", "RECORD", "REPLAN"]
-template = "templates/behavior.md"
 
 [kinds.prompt]
 states = ["PLAN", "IMPLEMENT", "EVAL", "RECORD", "REPLAN"]
-template = "templates/prompt.md"
 
 [kinds.bugfix]
 states = ["REPRO", "FIX", "VERIFY", "RECORD"]
-template = "templates/bugfix.md"
 
 [kinds.chore]
 states = ["IMPLEMENT", "RECORD"]
-template = "templates/chore.md"
+
+[sections."목표 동작"]
+
+[sections."가설"]
+
+[sections."변경 파일"]
+body = """
+| 파일 | 바꿀 내용 |
+|---|---|
+"""
+
+[sections."평가"]
+body = """
+- eval 명령:
+- 케이스 파일:
+- 지금 점수:
+- 합격 기준:
+- 결과 파일:
+"""
+
+[sections."결과별 다음 행동"]
+body = """
+| 결과 경계 | 다음 행동 |
+|---|---|
+"""
+
+[sections."평가 결과"]
+body = """
+| 케이스 묶음 | 바꾸기 전 | 바꾼 뒤 |
+|---|---|---|
+"""
+
+[sections."재현"]
+body = """
+- 증상:
+- 재현 명령:
+"""
+
+[sections."원인"]
+
+[sections."검증"]
+body = """
+- 테스트 명령:
+- 결과:
+"""
+
+[sections."기록"]
+body = """
+- 바뀐 동작:
+- 점수 변화:
+- 남은 실패 사례:
+"""
+
+[sections."결정"]
+body = """
+- 고른 갈래:
+- 다음 계획:
+"""
 
 [states.SPEC]
+sections = ["목표 동작", "결과별 다음 행동"]
 todo = [
   "\"목표 동작\" 절에 에이전트가 해야 할 일과 하지 말아야 할 일을 쓴다.",
   "\"결과별 다음 행동\" 표에 점수 경계마다 다음 행동을 두 갈래 이상 쓴다.",
@@ -44,6 +101,7 @@ checks = [
 review = "{plan}의 '목표 동작'과 '결과별 다음 행동'을 검토한다. 저장소의 프롬프트, 도구 정의, evals/를 읽는다. 다음을 찾는다. (1) eval로 확인할 수 없는 목표 동작 (2) 지금 프롬프트나 도구와 어긋나는 목표 (3) 수치 경계가 없거나 겹치는 결과별 다음 행동."
 
 [states.PLAN]
+sections = ["가설", "변경 파일", "평가", "결과별 다음 행동"]
 todo = [
   "\"가설\" 절에 무엇을 바꾸면 왜 점수가 오를지 쓴다.",
   "\"변경 파일\" 표에 고칠 프롬프트와 코드를 쓴다.",
@@ -62,6 +120,7 @@ review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 프롬
 
 [states.EVALSET]
 code = true
+sections = ["변경 파일", "평가"]
 todo = [
   "목표 동작을 확인할 eval 케이스를 evals/에 쓰고 \"변경 파일\" 표에 넣는다.",
   "\"평가\" 절에 eval 명령, 케이스 파일, 지금 점수(바꾸기 전 점수), 합격 기준, 결과 파일을 쓴다.",
@@ -77,6 +136,7 @@ checks = [
 
 [states.IMPLEMENT]
 code = true
+sections = ["변경 파일"]
 todo = [
   "\"변경 파일\" 표대로 프롬프트와 코드를 고친다. eval 케이스는 고치지 않는다.",
   "커밋한다.",
@@ -89,6 +149,7 @@ checks = [
 
 [states.EVAL]
 run = true
+sections = ["평가", "평가 결과"]
 todo = [
   "eval 명령을 돌려 결과 파일을 새로 만든다. 오래 걸리면 flow run으로 예상 종료 시각을 적는다.",
   "\"평가 결과\" 표에 케이스 묶음마다 바꾸기 전 점수와 바꾼 뒤 점수를 쓴다.",
@@ -101,6 +162,7 @@ checks = [
 
 [states.REPRO]
 code = true
+sections = ["재현", "변경 파일"]
 todo = [
   "\"재현\" 절에 증상과 재현 명령을 쓴다. 재현 명령은 지금 실패해야 한다.",
   "실패하는 대화나 도구 호출을 eval 케이스나 테스트로 쓰고 \"변경 파일\" 표에 넣은 뒤 커밋한다.",
@@ -113,6 +175,7 @@ checks = [
 
 [states.FIX]
 code = true
+sections = ["원인"]
 todo = [
   "\"원인\" 절에 원인과 고친 위치를 쓴다.",
   "고치고 커밋한다. 재현 명령이 통과해야 넘어간다.",
@@ -125,15 +188,17 @@ checks = [
 ]
 
 [states.VERIFY]
+sections = ["검증"]
 todo = [
-  "\"검증\" 절의 전체 eval이나 테스트 명령을 돌리고 결과를 쓴다.",
+  "전체 eval이나 테스트 명령([project] test, 비었으면 \"검증\" 절의 테스트 명령)을 돌리고 결과를 쓴다.",
 ]
 checks = [
-  {check = "filled", section = "검증", items = ["테스트 명령", "결과"]},
-  {check = "command", section = "검증", item = "테스트 명령"},
+  {check = "filled", section = "검증", items = ["결과"]},
+  {check = "command", use = "test", section = "검증", item = "테스트 명령"},
 ]
 
 [states.RECORD]
+sections = ["기록"]
 todo = [
   "\"기록\" 절에 바뀐 동작, 점수 변화, 남은 실패 사례를 쓴다.",
   "프롬프트나 도구 문서에 영향이 있으면 고쳐 커밋한다.",
@@ -143,6 +208,7 @@ checks = [
 ]
 
 [states.REPLAN]
+sections = ["결정"]
 todo = [
   "\"결과별 다음 행동\"에서 결과에 맞는 갈래를 골라 \"결정\" 절에 쓴다.",
   "어느 갈래에도 맞지 않으면 \"고른 갈래\"에 \"예상 밖\"을 쓰고 start --from P###로 원인을 찾는 계획을 시작한다.",

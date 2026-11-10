@@ -1,7 +1,7 @@
 """넘어가는 조건 검사 함수. config.toml의 [states.X] checks 목록에서 이름으로 부른다.
 
 검사 함수는 (ctx, spec)을 받아 빠진 항목 문장 목록을 돌려준다. 빈 목록이면 통과다.
-ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), state(지금 상태)
+ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), state(지금 상태), cfg(계획이 쓰는 구조 버전)
 spec에 only = [종류들] 이나 skip = [종류들] 을 두면 그 종류에만 걸거나 그 종류는 뺀다.
 """
 import json
@@ -105,11 +105,15 @@ def results(ctx, spec):
 
 @check
 def command(ctx, spec):
-    """명령이 기대한 대로 끝난다. run에 명령을 주거나, section과 item으로 계획 파일에 적은 명령을 쓴다.
-    expect = "fail"이면 실패해야 통과한다(버그 재현)"""
-    cmd = spec.get("run") or bullets(sec(ctx, spec)).get(spec.get("item", "명령"), "").strip("` ")
+    """명령이 기대한 대로 끝난다. run에 명령을 주거나, use = "test"로 [project] test 명령을 쓰거나,
+    section과 item으로 계획 파일에 적은 명령을 쓴다. use가 비어 있으면 계획 파일의 명령으로 넘어간다.
+    expect = "fail"이면 실패해야 통과한다(버그 재현, 테스트 먼저 쓰기)"""
+    cmd = spec.get("run") or (CFG["project"].get(spec["use"], "") if spec.get("use") else "")
+    if not cmd and spec.get("section"):
+        cmd = bullets(sec(ctx, spec)).get(spec.get("item", "명령"), "").strip("` ")
     if not cmd:
-        return [f"'{spec.get('section')}' 절의 '{spec.get('item', '명령')}'이 비었다"]
+        where = f"'{spec.get('section')}' 절의 '{spec.get('item', '명령')}'" if spec.get("section") else "명령"
+        return [f"{where}이 비었다" + (f"(config [project] {spec['use']}도 비었다)" if spec.get("use") else "")]
     try:
         r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=spec.get("timeout", 600))
@@ -202,7 +206,7 @@ def applies(spec, kind):
 
 
 def run_checks(ctx):
-    st = CFG["states"][ctx["state"]]
+    st = ctx["cfg"]["states"][ctx["state"]]
     miss = []
     for spec in st.get("checks", []):
         if not applies(spec, ctx["p"]["kind"]):
@@ -231,9 +235,17 @@ def review_check(ctx, st):
     model = st.get("review_model") or CFG["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
-    prompt = st["review"].format(plan=p["plan"], title=p["title"], kind=p["kind"], state=state) + (
-        " 문제마다 file:line 근거를 붙여 missing에 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. 파일을 고치지 않는다.")
-    meta = {}
+    prompt = st["review"].format(plan=p["plan"], title=p["title"], kind=p["kind"], state=state)
+    result, meta = call_reviewer(prompt, model)
+    p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text),
+                                         "missing": result["missing"], "at": now(), **meta}
+    return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
+
+
+def call_reviewer(prompt, model=None):
+    """읽기 도구만 쓰는 별도 Claude 호출. ({pass, missing}, {session, cost}). 호출이 실패하면 FAIL"""
+    prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. "
+               "파일을 고치지 않는다.")
     try:
         r = subprocess.run([shutil.which("claude") or "claude", "-p", *(["--model", model] if model else []),
                             "--setting-sources", "local", "--tools", CFG["review"].get("tools", "Read,Grep,Glob"),
@@ -241,10 +253,6 @@ def review_check(ctx, st):
                            cwd=ROOT, input=prompt, capture_output=True, text=True, encoding="utf-8",
                            timeout=CFG["review"].get("timeout", 600), env=os.environ | {"FLOW_REVIEW": "1"})
         out = json.loads(r.stdout)
-        result = out["structured_output"]
-        meta = {"session": out.get("session_id"), "cost": out.get("total_cost_usd")}
-    except Exception as e:  # 검토 실패는 FAIL
-        result = {"pass": False, "missing": [f"검토 호출 실패: {e!r}"]}
-    p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text),
-                                         "missing": result["missing"], "at": now(), **meta}
-    return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
+        return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd")}
+    except Exception as e:
+        return {"pass": False, "missing": [f"검토 호출 실패: {e!r}"]}, {}

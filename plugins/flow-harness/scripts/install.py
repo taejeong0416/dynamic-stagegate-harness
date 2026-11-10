@@ -3,14 +3,16 @@
 python -X utf8 install.py <preset> [--target 프로젝트 폴더]   새로 설치(preset: ml, agent, service)
 python -X utf8 install.py --update [--target 프로젝트 폴더]   엔진(.flow/flowkit)과 git hook만 다시 복사
 
-설치는 엔진, preset의 config.toml, 계획 틀, FLOW.md, git hook을 복사하고 core.hooksPath를 .githooks로 맞춘다.
-이미 있는 config.toml, 틀, FLOW.md는 덮어쓰지 않는다. 커밋은 하지 않는다.
+설치는 엔진, preset의 config.toml, FLOW.md, 블록 라이브러리(모든 preset의 config, .flow/library/), git hook을 복사하고
+core.hooksPath를 .githooks로 맞춘다. 이미 있는 config.toml은 덮어쓰지 않는다. 갱신은 엔진, FLOW.md, 라이브러리,
+git hook만 바꾼다. 커밋은 하지 않는다.
 """
 import argparse
 import json
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -40,6 +42,12 @@ def copy_engine(flow_dir):
         shutil.rmtree(dst)
     shutil.copytree(HERE / "flowkit", dst, ignore=shutil.ignore_patterns("__pycache__"))
     (flow_dir / "flow.py").write_text(SHIM, encoding="utf-8")
+    shutil.copy2(HERE / "FLOW.md", flow_dir / "FLOW.md")
+    lib = flow_dir / "library"  # 구조를 짤 때 빌려 쓸 상태와 절의 모음
+    lib.mkdir(exist_ok=True)
+    for p in PRESETS.iterdir():
+        if (p / "config.toml").exists():
+            shutil.copy2(p / "config.toml", lib / f"{p.name}.toml")
 
 
 def write_githooks(target):
@@ -81,7 +89,8 @@ def main():
             sys.exit("설치된 하네스가 없다. preset 이름을 주고 새로 설치한다")
         copy_engine(flow_dir)
         write_githooks(target)
-        print(f"엔진과 git hook을 갱신했다. 하네스 커밋으로 남긴다: git commit -m \"harness: flowkit 갱신\"")
+        print("엔진, FLOW.md, 라이브러리, git hook을 갱신했다. 하네스 커밋으로 남긴다: "
+              "git add .flow/flowkit .flow/flow.py .flow/FLOW.md .flow/library .githooks, git commit -m \"harness: flowkit 갱신\"")
         return
     names = sorted(p.name for p in PRESETS.iterdir() if p.is_dir())
     if a.preset not in names:
@@ -89,15 +98,18 @@ def main():
     src = PRESETS / a.preset
     flow_dir.mkdir(exist_ok=True)
     copy_engine(flow_dir)
-    for name in ("config.toml", "FLOW.md", "templates"):
-        copy_new(src / name, flow_dir / name)
+    copy_new(src / "config.toml", flow_dir / "config.toml")
     cfg = tomllib.loads((flow_dir / "config.toml").read_text(encoding="utf-8"))
     proj = cfg.get("project", {})
     state = target / proj.get("state_file", ".flow/state.json")
     if not state.exists():
         stages = cfg.get("stages", [])
-        state.write_text(json.dumps({"stage": stages[0]["n"] if stages else None, "plans": {}}, indent=2) + "\n",
-                         encoding="utf-8")
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=target, capture_output=True,
+                              text=True).stdout.strip()
+        harness = {"version": cfg.get("version", 1), "adopted": f"설치({a.preset})", "at": time.strftime("%Y-%m-%dT%H:%M"),
+                   "ts": time.time(), "commit": head, "stage": stages[0]["n"] if stages else None}
+        state.write_text(json.dumps({"stage": harness["stage"], "plans": {}, "harness": harness}, ensure_ascii=False,
+                                    indent=2) + "\n", encoding="utf-8")
     (target / proj.get("plans_dir", "plans")).mkdir(parents=True, exist_ok=True)
     write_githooks(target)
     print(f"\n{a.preset} preset을 설치했다. 다음 순서로 마무리한다.")
@@ -105,7 +117,7 @@ def main():
     print("  2. 하네스 파일만 커밋한다: git add .flow .githooks, git reset .flow/state.json, "
           "git commit -m \"harness: flow 하네스 설치\"")
     print("  3. 상태 파일을 따로 커밋한다: git add .flow/state.json, git commit -m \"chore: flow 상태 파일\"")
-    print("  4. python -X utf8 .flow/flow.py status")
+    print("  4. python -X utf8 .flow/flow.py describe로 구조를 보고, flow-setup skill의 인터뷰로 PROFILE.md와 첫 조정을 한다")
 
 
 if __name__ == "__main__":

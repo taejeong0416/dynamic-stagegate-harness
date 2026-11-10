@@ -26,6 +26,7 @@ READ_SEG = re.compile(r"^\s*(cat|type|head|tail|ls|dir|wc|grep|rg|findstr|Get-Co
 STATE_TOUCH = re.compile(r"\.flow/state\.json|\.flow/flow\.py|import\s+flowkit|from\s+flowkit|flow\.lock")
 HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"
                       r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
+ADOPT = re.compile(r"\badopt\s+(\S+)\s+--approved\s+(?:\"([^\"]*)\"|'([^']*)')")
 SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item)"
                          r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
 
@@ -43,6 +44,11 @@ def emit(obj):
 
 
 def deny(reason):
+    try:  # 하네스 점검 자료
+        from .core import log_event
+        log_event("guard", reason)
+    except Exception:
+        pass
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                  "permissionDecisionReason": reason}})
     sys.exit(0)
@@ -58,13 +64,17 @@ def rel(path, root):
 # guard
 
 def guard(inp):
-    from .core import ROOT, STATE, code_open, dirty_code, is_code, is_harness, load, remote_on, run_open, LAUNCH, UPLOAD
+    from .core import (ROOT, STATE, code_open, dirty_code, is_code, is_protected, load, remote_on, run_open, LAUNCH,
+                       UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
     if tool in EDIT_TOOLS:
         path = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT) or ""
         if path == state_rel or path.startswith(".git/"):
             deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .flow/flow.py 명령으로만 바꾼다.")
+        if is_protected(path):
+            deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .flow/proposals/H###.md에 제안서를 쓰고 "
+                 "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(flow-evolve skill).")
         if is_code(path) and not code_open(load()):
             deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .flow/flow.py status로 상태를 보고, "
                  "계획을 시작하거나 next로 코드 상태까지 진행한다.")
@@ -76,8 +86,17 @@ def guard(inp):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
     if STATE_TOUCH.search(cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
         deny("상태는 python -X utf8 .flow/flow.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
+    if CLI_CMD.match(cmd) and re.search(r"\.flow/flow\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만
+        m = ADOPT.search(cmd)
+        quote = " ".join((m.group(2) or m.group(3) or "").split()) if m else ""
+        prompt = read_transcript(inp["transcript_path"], LAUNCH)["prompt"] if inp.get("transcript_path") else ""
+        if not quote or quote not in prompt:
+            deny("adopt --approved의 문장이 이번 턴 사용자 입력에 없다. 제안서의 바꾸는 것과 근거를 사용자에게 보이고, "
+                 "사용자가 승인한 문장을 그대로 넣는다.")
     flow = load()
     for m in SHELL_WRITE.finditer(cmd):
+        if is_protected(m.group(2)):
+            deny(f"{m.group(2)}는 하네스 구조 파일이라 셸로 쓰지 않는다. 제안서와 adopt로 바꾼다.")
         if is_code(m.group(2)) and not code_open(flow):
             deny(f"코드를 고치는 상태인 계획이 없어 셸로 {m.group(2)}를 쓰는 것을 막았다.")
     if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd)):
@@ -174,7 +193,7 @@ def eta_passed(run):
 
 
 def stop_problems(inp):
-    from .core import CFG, P, ROOT, STATE, dirty, is_code, is_harness, load, remote_on, sections, LAUNCH
+    from .core import P, ROOT, STATE, dirty, is_code, is_harness, load, remote_on, sections, state_def, LAUNCH
     from .checks import results
     t = read_transcript(inp["transcript_path"], LAUNCH)
     flow = load()
@@ -206,7 +225,7 @@ def stop_problems(inp):
         p = flow["plans"][pid]
         if p.get("hold") and p["hold"]["quote"] in t["prompt"]:
             continue
-        st = CFG["states"].get(p["state"], {})
+        st = state_def(p)
         if p["state"] in P["stop_states"]:
             problems.append(f"{pid} {p['title']}가 {p['state']}에 머물러 있다. 할 일을 하고 "
                             f"python -X utf8 .flow/flow.py next {pid}로 넘긴다.")
@@ -238,6 +257,12 @@ def stop(inp):
         emit({"systemMessage": f"Stop hook이 {STOP_CAP}번 연속 막아 이번에는 통과시켰다. 남은 문제:\n" + "\n".join(problems)})
         return
     counter.write_text(json.dumps({"n": n + 1}))
+    try:  # 하네스 점검 자료
+        from .core import log_event
+        for x in problems:
+            log_event("stop", x.splitlines()[0])
+    except Exception:
+        pass
     emit({"decision": "block", "reason": "\n\n".join(problems)})
 
 
@@ -264,6 +289,11 @@ def context(event):
         for title in P["status_sections"]:
             m = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
             parts.append(f"## {title}\n" + (m.group(1).strip() if m else "(없음)"))
+    from .evolve import review_due
+    why = review_due(flow)
+    if why:
+        parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 flow-evolve skill로 "
+                     "진단하고 구조 변경 제안서를 쓴다. 지금 요청이 급하면 그 일을 먼저 한다.")
     emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n\n".join(parts)}})
 
 

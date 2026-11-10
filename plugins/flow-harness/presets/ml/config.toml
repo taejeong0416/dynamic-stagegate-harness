@@ -1,7 +1,8 @@
 # ml preset: 대회와 연구 실험
 # 실험 기록은 experiments/log.csv(첫 칸 실험 번호 E###), 접근법 목록은 progress/ideas.md,
 # 현재 상태는 progress/status.md, 결정은 progress/decisions.md에 둔다.
-# 상태별 할 일(todo)과 넘어가는 조건(checks)의 원본이다. 검사 이름은 .flow/flowkit/checks.py에 있다.
+# 하네스 구조의 원본이다. 이 파일은 제안서와 flow adopt로만 바꾼다(.flow/FLOW.md).
+version = 1
 
 [project]
 plans_dir = "experiments/plans"
@@ -52,33 +53,102 @@ kinds = ["repro", "infra"]
 
 [kinds.new]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
-template = "templates/plan.md"
 
 [kinds.model]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
-template = "templates/plan.md"
 
 [kinds.tune]
 states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
-template = "templates/plan.md"
 
 [kinds.freeze]
 states = ["PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
-template = "templates/plan.md"
 
 [kinds.repro]
 states = ["PLAN", "RUN", "RECORD"]
-template = "templates/plan.md"
 
 [kinds.eda]
 states = ["QUESTION", "MEASURE", "RECORD", "REPLAN"]
-template = "templates/plan.md"
 
 [kinds.infra]
 states = ["IMPLEMENT", "RECORD"]
-template = "templates/plan.md"
+
+[sections."조사"]
+body = """
+| 읽은 문서(경로나 URL) | 읽고 얻은 것 |
+|---|---|
+
+| 지난 실험 번호 | 이번 계획과의 관계 |
+|---|---|
+"""
+
+[sections."질문"]
+body = """
+- 질문:
+- 바뀌는 결정:
+- 측정 방법:
+"""
+
+[sections."후보"]
+body = """
+| 후보 ID | 축 | 후보 | 기대 이득 | 비용 | 겹치는 지난 실험 | 선택 | 이유 |
+|---|---|---|---|---|---|---|---|
+
+- 고른 묶음:
+"""
+
+[sections."행 조건 대조표"]
+body = """
+| 아이디어 행의 조건 | 구현 파일 | 함수나 위치 |
+|---|---|---|
+"""
+
+[sections."비교 기준"]
+body = """
+- 기준 실험:
+- 판정 규칙:
+"""
+
+[sections."결과별 다음 행동"]
+body = """
+| 결과 경계 | 다음 행동 | 가리키는 항목 |
+|---|---|---|
+"""
+
+[sections."실행 계획"]
+body = """
+- 실행 위치:
+- 결과 파일:
+- 예상 소요 시간과 근거:
+"""
+
+[sections."값 근거"]
+body = """
+| 값 | 쓰는 곳 | 근거 |
+|---|---|---|
+"""
+
+[sections."표본 실행"]
+body = """
+- 명령:
+- 커밋:
+- 결과 요약:
+"""
+
+[sections."기록"]
+body = """
+- log.csv 행:
+- ideas.md 상태:
+- 일반 원칙과의 관계:
+"""
+
+[sections."결정"]
+body = """
+- 고른 갈래:
+- status.md 영향:
+"""
 
 [states.RESEARCH]
+sections = ["조사"]
 todo = [
   "관련 문서(논문, 위키, 지난 대회 솔루션)를 읽고 \"조사\" 절 첫 표에 경로나 URL과 얻은 것을 쓴다.",
   "같은 정보원을 다룬 지난 실험 번호를 둘째 표에 쓴다.",
@@ -90,6 +160,7 @@ checks = [
 ]
 
 [states.IDEATE]
+sections = ["후보"]
 todo = [
   "정보원 하나를 여러 축(정보 표현, 넣는 자리, 범위, 조건부 적용, 기존 신호와 조합, 다른 정보원, 조사한 기법)으로 펼쳐 \"후보\" 표에 쓴다. 일부러 엉뚱한 후보도 넣는다.",
   "새 후보는 progress/ideas.md에 행을 더한다.",
@@ -102,6 +173,7 @@ checks = [
 review = "{plan}의 '조사'와 '후보' 절을 검토한다. progress/ideas.md, experiments/log.csv, '조사' 절에 적힌 문서를 읽는다. 다음을 찾는다. (1) 후보가 없거나 형식만 채운 축 (2) 조사한 문서와 ideas.md에 있는데 후보에 없는 기법 (3) 지난 실험에서 기여가 없던 방식과 같은데 이유 없이 넣은 후보."
 
 [states.SELECT]
+sections = ["후보"]
 todo = [
   "후보마다 기대 이득, 비용, 겹치는 지난 실험 번호를 채운다.",
   "이번에 잴 후보는 선택 칸에 \"선택\", 미룰 후보는 \"보류\"를 쓰고 이유를 쓴다. 싼 변형은 한 실험으로 묶는다.",
@@ -113,6 +185,7 @@ checks = [
 ]
 
 [states.PLAN]
+sections = ["행 조건 대조표", "비교 기준", "결과별 다음 행동", "실행 계획"]
 todo = [
   "\"행 조건 대조표\"에 아이디어 행의 조건 하나마다 구현할 파일과 함수를 쓴다.",
   "\"비교 기준\"에 기준 실험 번호와 판정 규칙(seed 수, 작은 차이의 처리)을 쓴다.",
@@ -131,6 +204,7 @@ checks = [
 review = "{plan}의 계획을 검토한다. progress/ideas.md, progress/decisions.md, progress/status.md, experiments/log.csv를 읽는다. 다음을 찾는다. (1) 아이디어 행 문장의 조건 중 '행 조건 대조표'에 없는 것 (2) decisions.md의 결정과 어긋나는 설정 (3) status.md 계획과 맞지 않는 '결과별 다음 행동' (4) 근거가 없는데 근거 있는 것처럼 적은 값."
 
 [states.IMPLEMENT]
+sections = ["행 조건 대조표", "값 근거", "표본 실행"]
 code = true
 todo = [
   "행 조건 대조표대로 코드를 쓴다.",
@@ -148,6 +222,7 @@ checks = [
 ]
 
 [states.RUN]
+sections = ["실행 계획"]
 run = true
 todo = [
   "flow run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.",
@@ -160,6 +235,7 @@ checks = [
 ]
 
 [states.QUESTION]
+sections = ["질문", "결과별 다음 행동", "행 조건 대조표"]
 todo = [
   "\"질문\" 절에 질문, 결과로 바뀌는 결정, 측정 방법을 쓴다.",
   "\"결과별 다음 행동\"을 두 갈래 이상 쓴다.",
@@ -172,6 +248,7 @@ checks = [
 ]
 
 [states.MEASURE]
+sections = ["값 근거", "실행 계획"]
 code = true
 todo = [
   "측정 코드를 커밋하고 돌린다.",
@@ -185,6 +262,7 @@ checks = [
 ]
 
 [states.RECORD]
+sections = ["기록"]
 todo = [
   "experiments/log.csv에 실험 행을 쓰고 \"기록\" 절의 log.csv 행에 그 실험 번호를 쓴다.",
   "progress/ideas.md 행의 상태를 결과에 맞게 고치고 실험 번호를 쓴다.",
@@ -198,6 +276,7 @@ checks = [
 ]
 
 [states.REPLAN]
+sections = ["결정"]
 todo = [
   "\"결과별 다음 행동\"에서 결과에 맞는 갈래를 골라 \"결정\" 절에 쓴다.",
   "어느 갈래에도 맞지 않으면 \"고른 갈래\"에 \"예상 밖\"을 쓰고 start --from P###로 새 계획을 RESEARCH에서 시작한다.",
