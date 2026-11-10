@@ -24,19 +24,24 @@ stateDiagram-v2
     state "PLAN<br>검토" as PLAN
     state "TESTFIRST<br>코드" as TESTFIRST
     state "IMPLEMENT<br>코드" as IMPLEMENT
+    state "REVIEW<br>검토" as REVIEW
     [*] --> SPEC
     SPEC --> PLAN
     PLAN --> TESTFIRST
     TESTFIRST --> IMPLEMENT
     IMPLEMENT --> TEST
-    TEST --> RECORD
+    TEST --> REVIEW
+    REVIEW --> RECORD
     RECORD --> [*]
     TEST --> IMPLEMENT : back
     TEST --> PLAN : back
     TEST --> SPEC : back
+    REVIEW --> IMPLEMENT : back
+    REVIEW --> PLAN : back
+    REVIEW --> SPEC : back
 ```
 
-TESTFIRST는 구현 전에 쓴 테스트가 실패해야 넘어가고, TEST는 그 테스트와 프로젝트 테스트 명령이 통과해야 넘어간다. TEST는 SPEC에서 검토받은 절과 TESTFIRST에서 실패했던 새 테스트 명령이 그 뒤에 바뀌지 않았는지도 본다. 에이전트가 순서를 건너뛰면 다음처럼 막히고, 막힌 이유와 다음에 할 일을 같이 받는다.
+TESTFIRST는 구현 전에 쓴 테스트가 실패해야 넘어가고, TEST는 그 테스트와 프로젝트 테스트 명령이 통과해야 넘어간다. TEST는 SPEC에서 검토받은 절과 TESTFIRST에서 실패했던 새 테스트 명령이 그 뒤에 바뀌지 않았는지 본다. TESTFIRST에서 쓴 테스트 파일을 그 뒤에 고쳤으면 "테스트 수정" 표에 이유가 적혀 있어야 TEST가 넘어간다. REVIEW의 검토자는 계획을 시작한 뒤의 코드 diff를 받아 계획 파일과 견주고, 고친 테스트가 약해졌는지도 본다. 에이전트가 순서를 건너뛰면 다음처럼 막히고, 막힌 이유와 다음에 할 일을 같이 받는다.
 
 ```
 # 계획 없이 코드를 고치려 할 때 (PreToolUse hook)
@@ -77,7 +82,11 @@ Python 3.11 이상과 git이 필요하다.
 - `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 계획을 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르게 하거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
 - 종류의 `back`에 되돌아가는 경로를 적어 두면 그 경로로만 돌아가고, 경로는 다이어그램과 진단에 하나씩 나온다.
 - `unchanged` 검사는 상태를 넘길 때 절 내용을 기록해 두고 뒤 상태에서 그 내용이 바뀌었으면 막는다. 실패했던 테스트 명령이나 검토받은 수용 기준을 나중에 고쳐서 통과하지 못한다.
+- `test_edits` 검사는 먼저 쓴 테스트, 재현 테스트, 고정한 eval 케이스, refactor 전의 테스트를 고치거나 지운 계획을 막는다. 고친 파일과 이유를 "테스트 수정" 표에 쓰면 넘어가고, service의 REVIEW 검토자가 그 변경을 다시 본다.
+- 실패해야 하는 명령은 테스트를 돌리지 못한 경우를 실패로 치지 않는다. 명령의 프로그램을 찾지 못하거나 종료 코드가 4, 5, 126, 127이면 막는다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않아서, 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 넘어갈 수 있다.
+- 검토자 지시문에 `{diff}`를 넣으면 계획을 시작한 뒤의 코드 diff를 파일로 받고, 코드가 바뀌면 같은 계획 내용이어도 다시 검토한다. diff 머리에는 "변경 파일" 표에 있는데 바뀌지 않은 파일과 표에 없는데 바뀐 파일이 적힌다.
 - 종류에 `limit` 조건을 두면 그 조건을 벗어난 계획은 커밋과 `next`가 막힌다. service와 agent의 chore는 계획에 적은 코드 파일이 5개를 넘으면 다른 종류로 다시 시작해야 한다.
+- service의 chore는 `[project] affected` 명령이 통과해야 끝난다. affected에는 `npx vitest related --run {files}`처럼 계획의 코드 파일과 관련된 테스트만 돌리는 명령을 넣고, 비어 있으면 전체 테스트 명령을 쓴다.
 - 코드 상태인 계획이 없으면 코드 편집을 막고, 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막는다. 구조 파일인 config.toml, history, gatekit과 git hook을 직접 편집하는 것도 막는다.
 - 이 세션이 고친 코드나 하네스 파일에 커밋하지 않은 변경이 있거나, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있으면 턴을 끝내지 못하게 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는 막지 않는다.
 - SessionStart hook이 진행 중인 계획과 할 일을 컨텍스트에 넣고, 메시지마다 계획 목록이 한 줄씩 들어간다. 컨텍스트가 압축돼도 상태는 파일에 남아 있어서 다시 들어온다.
@@ -88,8 +97,8 @@ Python 3.11 이상과 git이 필요하다.
 | preset | 쓰는 곳 | 종류와 상태 경로 |
 |---|---|---|
 | ml | 대회, 연구 실험 | new와 model(RESEARCH부터 REPLAN까지 8개), tune, freeze, repro, eda, infra. 프로젝트 단계별로 허용 종류를 제한하고, 서버 실행은 커밋과 예상 종료 시각 기록 뒤에만 연다 |
-| agent | LLM 에이전트, 프롬프트, 도구 | behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN), prompt, bugfix, chore. eval 케이스를 구현 전에 커밋하고, 결과 파일이 새로 만들어져야 넘어간다 |
-| service | 웹 서비스, 앱, 라이브러리, CLI | feature(SPEC, PLAN, TESTFIRST, IMPLEMENT, TEST, RECORD), bugfix(재현 명령이 REPRO에서 실패하고 FIX에서 통과), refactor, chore |
+| agent | LLM 에이전트, 프롬프트, 도구 | behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN), prompt, bugfix, chore. eval 케이스를 구현 전에 커밋하고, 결과 파일이 새로 만들어져야 넘어간다. 고정한 케이스를 고치면 이유를 적어야 한다 |
+| service | 웹 서비스, 앱, 라이브러리, CLI | feature(SPEC, PLAN, TESTFIRST, IMPLEMENT, TEST, REVIEW, RECORD), bugfix(재현 명령이 REPRO에서 실패하고 FIX에서 통과), refactor, chore. chore를 뺀 종류는 REVIEW에서 코드 diff를 검토받는다 |
 
 고른 preset은 처음 구조로 쓰인다. 설치하면 세 preset의 구조가 `.gate/library/`에 같이 들어가서, 구조를 바꿀 때 다른 preset의 상태와 절을 빌려 쓴다.
 
@@ -112,6 +121,7 @@ stateDiagram-v2
     state "TESTFIRST<br>코드" as TESTFIRST
     state "IMPLEMENT<br>코드" as IMPLEMENT
     state "MIGRATE<br>코드" as MIGRATE
+    state "REVIEW<br>검토" as REVIEW
     [*] --> SPEC : --with quick 아님
     [*] --> PLAN : SPEC 건너뜀
     SPEC --> PLAN
@@ -120,11 +130,15 @@ stateDiagram-v2
     IMPLEMENT --> MIGRATE : migrations/ 변경
     IMPLEMENT --> TEST : MIGRATE 건너뜀
     MIGRATE --> TEST
-    TEST --> RECORD
+    TEST --> REVIEW
+    REVIEW --> RECORD
     RECORD --> [*]
     TEST --> IMPLEMENT : back
     TEST --> PLAN : back
     TEST --> SPEC : back
+    REVIEW --> IMPLEMENT : back
+    REVIEW --> PLAN : back
+    REVIEW --> SPEC : back
 ```
 
 ## 넘어가는 조건
@@ -141,7 +155,7 @@ stateDiagram-v2
 | numbers | 코드에 새로 넣은 숫자(0과 1 제외)가 근거 표 첫 칸에 있다 |
 | sample | 표본 실행 절의 커밋이 코드 파일을 마지막으로 바꾼 커밋이다 |
 | results | 이 상태에 들어온 뒤에 결과 파일이 만들어졌다([remote]가 있으면 서버도 본다) |
-| command | 명령이 통과한다. use = "test"면 [project] test 명령을 쓰고, expect = "fail"이면 실패해야 한다 |
+| command | 명령이 통과한다. use = "test"나 "affected"면 [project]의 그 명령을 쓰고, expect = "fail"이면 테스트가 돌고 실패해야 한다 |
 | run_record | `gate run` 기록이 있다 |
 | commit_since | 이 상태에 들어온 뒤 path를 바꾼 커밋이 있다(mention = true면 계획 번호를 쓴 줄) |
 | choice | 고른 갈래가 결과별 다음 행동 표의 첫 칸 하나이거나 escape 문구다 |
@@ -149,6 +163,7 @@ stateDiagram-v2
 | paths_exist | 절에 적은 파일 경로가 모두 있다 |
 | reviewed | state에서 받은 검토 뒤 계획 내용이 바뀌지 않았다 |
 | unchanged | state를 넘긴 뒤 그 상태가 쓰는 절이 바뀌지 않았다(sections로 절을, section과 items로 bullet 항목을 고른다) |
+| test_edits | state를 처음 넘긴 뒤 고치거나 지운 테스트 파일이 section 표에 있다. state가 없으면 계획을 시작한 뒤를 본다 |
 
 ## 비슷한 접근과 차이
 

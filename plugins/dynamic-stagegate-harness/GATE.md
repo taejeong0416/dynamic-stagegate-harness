@@ -49,6 +49,12 @@ limit은 when과 같은 조건 키를 쓴다. `limit = {max_files = 5}`인 종�
 
 unchanged 검사는 `next`가 상태를 넘길 때 남긴 절 내용 기록과 지금 계획 파일을 견준다. `{check = "unchanged", state = "SPEC"}`는 SPEC이 쓰는 절 전체를, `{check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"]}`는 그 bullet 항목만 본다. 바뀐 내용이 맞으면 back으로 그 상태에 돌아가 다시 넘긴다.
 
+test_edits 검사는 `[project] tests` 패턴에 맞는 계획의 테스트 파일 가운데 state를 처음 넘긴 뒤 고치거나 지운 파일이 section 표의 첫 칸에 있는지 본다. state를 주지 않으면 계획을 시작한 뒤를 보고, 새로 더한 테스트 파일은 보지 않는다. 테스트가 틀렸으면 고치고 표에 이유를 쓰며, 기대값을 구현에 맞춰 바꾸지 않는다.
+
+command 검사의 `use`는 `[project]`의 test나 affected를 가리키고, affected가 비어 있으면 test를 쓴다. 명령 속 `{files}`는 계획의 코드 파일로 바뀌고, `optional = true`면 명령이 없을 때 통과한다. `expect = "fail"`이면 테스트가 돌고 실패해야 한다. 명령의 프로그램을 찾지 못하거나 종료 코드가 `reject`에 있으면 막는데, `reject`의 기본값은 4, 5, 126, 127이다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않는다. 그래서 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 테스트를 고치지 않았다면 다시 넘길 수 있다.
+
+review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`를 쓸 수 있다. `{diff}`는 계획을 시작한 뒤의 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀌고, 코드가 바뀌면 계획 내용이 같아도 다시 검토한다.
+
 ## 막는 장치
 
 | 장치 | 막는 경우 |

@@ -39,7 +39,7 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 | 주제 | 묻는 것 | 바뀌는 구조 |
 |---|---|---|
 | 목적 | 무엇을 만들고, 언제 성공했다고 보는가(점수, 출시, 학습) | PROFILE의 기준, REPLAN 같은 결과 판단 상태의 유무 |
-| 검증 | 무엇으로 맞았는지 확인하는가(단위 테스트, e2e, eval, 로컬 점수, 사람 확인)와 그 명령 | [project] test, TESTFIRST, EVALSET, EVAL, RUN 같은 상태와 command 검사 |
+| 검증 | 무엇으로 맞았는지 확인하는가(단위 테스트, e2e, eval, 로컬 점수, 사람 확인)와 그 명령. 저장소의 테스트 도구로 관련 테스트만 돌리는 명령(vitest related, jest --findRelatedTests, pytest-testmon)과 테스트 파일 위치를 찾아 권장 답에 넣는다 | [project] test, affected, tests, TESTFIRST, EVALSET, EVAL, RUN 같은 상태와 command 검사 |
 | 작업 종류 | 주로 하는 일과 그 비율(기능, 버그, 실험, 프롬프트 조정, 잡일) | kinds 목록, 쓰지 않을 종류 빼기 |
 | 실패 비용 | 잘못 나가면 무엇이 깨지고 되돌리기 쉬운가 | 검토자를 거는 상태, TESTFIRST를 기본으로 할지 option으로 둘지 |
 | 산출물 | 코드 말고 바뀌는 것(DB 마이그레이션, 인프라 설정, 문서, 제출 파일) | 새 상태(MIGRATE 같은)와 when 조건, code 패턴 |
