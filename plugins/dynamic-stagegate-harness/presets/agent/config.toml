@@ -9,10 +9,12 @@ plan_prefix = "P"
 code = ["src/*", "agent/*", "prompts/*", "tools/*", "evals/*", "tests/*"]
 tracked = ["src", "agent", "prompts", "tools", "evals", "tests", "plans", "docs", ".gate", ".githooks"]
 files_section = "변경 파일"
-unreviewed = ["평가 결과", "원인", "검증", "기록", "결정"]
+unreviewed = ["평가 결과", "테스트 수정", "원인", "검증", "기록", "결정"]
 stop_states = ["RECORD", "REPLAN"]
 max_visits = 3
 test = ""
+# eval 케이스와 테스트 파일. 먼저 고정한 케이스를 고치거나 지우면 '테스트 수정' 표에 적어야 넘어간다
+tests = ["evals/*", "tests/*"]
 
 [review]
 tools = "Read,Grep,Glob"
@@ -63,6 +65,12 @@ body = """
 body = """
 | 케이스 묶음 | 바꾸기 전 | 바꾼 뒤 |
 |---|---|---|
+"""
+
+[sections."테스트 수정"]
+body = """
+| 파일 | 고친 이유 |
+|---|---|
 """
 
 [sections."재현"]
@@ -143,7 +151,7 @@ checks = [
 code = true
 sections = ["변경 파일"]
 todo = [
-  "\"변경 파일\" 표대로 프롬프트와 코드를 고친다. eval 케이스는 고치지 않는다.",
+  "\"변경 파일\" 표대로 프롬프트와 코드를 고친다. eval 케이스는 고치지 않는다. 케이스가 틀려 고쳐야 하면 \"테스트 수정\" 표에 파일과 이유를 쓴다.",
   "커밋한다.",
 ]
 checks = [
@@ -154,7 +162,7 @@ checks = [
 
 [states.EVAL]
 run = true
-sections = ["평가", "평가 결과"]
+sections = ["평가", "평가 결과", "테스트 수정"]
 todo = [
   "eval 명령을 돌려 결과 파일을 새로 만든다. 오래 걸리면 gate run으로 예상 종료 시각을 적는다.",
   "\"평가 결과\" 표에 케이스 묶음마다 바꾸기 전 점수와 바꾼 뒤 점수를 쓴다.",
@@ -163,6 +171,8 @@ checks = [
   {check = "clean"},
   {check = "unchanged", state = "EVALSET", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["behavior"]},
   {check = "unchanged", state = "PLAN", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["prompt"]},
+  {check = "test_edits", state = "EVALSET", section = "테스트 수정", only = ["behavior"]},
+  {check = "test_edits", section = "테스트 수정", only = ["prompt"]},
   {check = "results", section = "평가", item = "결과 파일"},
   {check = "table", section = "평가 결과"},
 ]
@@ -182,15 +192,16 @@ checks = [
 
 [states.FIX]
 code = true
-sections = ["원인"]
+sections = ["원인", "테스트 수정"]
 todo = [
   "\"원인\" 절에 원인과 고친 위치를 쓴다.",
-  "고치고 커밋한다. 재현 명령이 통과해야 넘어간다.",
+  "고치고 커밋한다. 재현 명령이 통과해야 넘어간다. REPRO에서 쓴 케이스나 테스트를 고치면 \"테스트 수정\" 표에 파일과 이유를 쓴다.",
 ]
 checks = [
   {check = "filled", section = "원인"},
   {check = "clean"},
   {check = "files_changed", any = true},
+  {check = "test_edits", state = "REPRO", section = "테스트 수정"},
   {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
   {check = "command", section = "재현", item = "재현 명령"},
 ]

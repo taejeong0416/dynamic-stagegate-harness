@@ -4,14 +4,16 @@
 ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), state(지금 상태), cfg(계획이 쓰는 구조 버전)
 spec에 only = [종류들] 이나 skip = [종류들] 을 두면 그 종류에만 걸거나 그 종류는 뺀다.
 """
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 
-from .core import (CFG, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, new_numbers, now,
-                   num_value, plan_files, plan_hash, result_status, snapshot, tables)
+from .core import (CFG, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, git_path, is_code, is_test,
+                   new_numbers, now, num_value, plan_files, plan_hash, result_status, snapshot, tables)
 
 CHECKS = {}
 
@@ -103,27 +105,70 @@ def results(ctx, spec):
         result_status(paths, ctx["p"]["entered"][ctx["state"]]["ts"])
 
 
+# 테스트를 돌리지 못한 종료 코드: pytest의 사용 오류(4)와 모은 테스트 없음(5), 셸의 실행 불가(126)와 명령 없음(127)
+NOT_RUN = [4, 5, 126, 127]
+SHELL_WORDS = {"cd", "echo", "exit", "set", "export", "test", "true", "false", "call", "type", "source", "."}
+
+
+def missing_program(cmd):
+    """명령의 첫 프로그램을 PATH와 저장소에서 찾지 못했으면 그 이름. cmd.exe는 없는 명령에도 1을 돌려줘서 따로 본다"""
+    try:
+        words = shlex.split(cmd, posix=os.name != "nt")
+    except ValueError:
+        return None
+    words = [w.strip('"') for w in words if not re.fullmatch(r"\w+=.*", w)]
+    if not words or not re.fullmatch(r"[\w./\\:-]+", words[0]) or words[0] in SHELL_WORDS:
+        return None
+    return None if shutil.which(words[0]) or (ROOT / words[0]).exists() else words[0]
+
+
+def test_fingerprint(ctx, cmd):
+    """명령과, 계획을 시작한 뒤 바뀐 테스트 파일의 커밋된 내용"""
+    files = sorted(f for f in changed_since(ctx["p"]["entered"]["_start"]["commit"]) if is_test(f))
+    blobs = git("ls-tree", "-r", "HEAD", "--", *files) if files else ""
+    return hashlib.sha256((cmd + "\n" + blobs).encode("utf-8")).hexdigest()[:16]
+
+
 @check
 def command(ctx, spec):
-    """명령이 기대한 대로 끝난다. run에 명령을 주거나, use = "test"로 [project] test 명령을 쓰거나,
-    section과 item으로 계획 파일에 적은 명령을 쓴다. use가 비어 있으면 계획 파일의 명령으로 넘어간다.
-    expect = "fail"이면 실패해야 통과한다(버그 재현, 테스트 먼저 쓰기)"""
-    cmd = spec.get("run") or (CFG["project"].get(spec["use"], "") if spec.get("use") else "")
+    """명령이 기대한 대로 끝난다. run에 명령을 주거나, use로 [project]의 test나 affected 명령을 쓰거나,
+    section과 item으로 계획 파일에 적은 명령을 쓴다. affected가 비었으면 test를, use가 가리키는 명령이 비었으면
+    계획 파일의 명령을 쓴다. 명령의 {files}는 계획의 코드 파일로 바뀐다. optional = true면 명령이 없을 때 통과한다.
+    expect = "fail"이면 실패해야 통과한다(버그 재현, 테스트 먼저 쓰기). 이때 reject의 종료 코드(기본 NOT_RUN)나
+    찾지 못한 프로그램은 테스트를 돌리지 못한 것으로 보고 막는다. 같은 명령과 같은 테스트 파일로 실패를 한 번
+    확인했으면 다시 돌리지 않는다. 구현한 뒤 back으로 이 상태에 돌아와도 넘어갈 수 있게 하기 위해서다"""
+    proj, use = CFG["project"], spec.get("use")
+    cmd = spec.get("run") or ((proj.get(use) or (proj.get("test", "") if use == "affected" else "")) if use else "")
     if not cmd and spec.get("section"):
         cmd = bullets(sec(ctx, spec)).get(spec.get("item", "명령"), "").strip("` ")
     if not cmd:
+        if spec.get("optional"):
+            return []
         where = f"'{spec.get('section')}' 절의 '{spec.get('item', '명령')}'" if spec.get("section") else "명령"
-        return [f"{where}이 비었다" + (f"(config [project] {spec['use']}도 비었다)" if spec.get("use") else "")]
+        return [f"{where}이 비었다" + (f"(config [project] {use}도 비었다)" if use else "")]
+    cmd = cmd.replace("{files}", " ".join(plan_files(ctx["s"])))
+    fail = spec.get("expect") == "fail"
+    if fail:
+        key = test_fingerprint(ctx, cmd)
+        if key in ctx["p"].get("proven_fail", {}):
+            return []
+        prog = missing_program(cmd)
+        if prog:
+            return [f"`{cmd}`의 {prog}를 찾지 못했다. 테스트를 돌릴 수 있는 명령을 쓴다"]
     try:
         r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=spec.get("timeout", 600))
     except subprocess.TimeoutExpired:
         return [f"명령이 시간 안에 끝나지 않았다: {cmd}"]
-    ok = (r.returncode != 0) if spec.get("expect") == "fail" else (r.returncode == 0)
-    if ok:
-        return []
     tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-8:])
-    want = "실패해야" if spec.get("expect") == "fail" else "통과해야"
+    if fail and r.returncode in spec.get("reject", NOT_RUN):
+        return [f"`{cmd}`가 테스트를 돌리지 못한 것으로 보인다(종료 코드 {r.returncode}). 테스트가 돌고 실패해야 한다. "
+                f"이 도구에서 이 코드가 테스트 실패라면 검사의 reject를 바꾸는 제안서를 쓴다.\n{tail}"]
+    if (r.returncode != 0) if fail else (r.returncode == 0):
+        if fail and not dirty_code():
+            ctx["p"].setdefault("proven_fail", {})[key] = now()
+        return []
+    want = "실패해야" if fail else "통과해야"
     return [f"`{cmd}`가 {want} 하는데 종료 코드가 {r.returncode}다.\n{tail}"]
 
 
@@ -219,6 +264,22 @@ def unchanged(ctx, spec):
             for k in keys if snap.get(k) != cur.get(k)]
 
 
+@check
+def test_edits(ctx, spec):
+    """state를 처음 넘긴 뒤(state가 없거나 건너뛰었으면 계획을 시작한 뒤) 고치거나 지운 테스트 파일([project] tests)이
+    section 표의 첫 칸에 있다. 계획의 코드 파일만 보고, 새로 더한 테스트 파일은 보지 않는다"""
+    p, st = ctx["p"], spec.get("state")
+    base = p.get("first_passed", {}).get(st) if st else None
+    after = f"{st}를 넘긴 뒤" if base else "계획을 시작한 뒤"
+    base = base or p["entered"]["_start"]["commit"]
+    listed = set(plan_files(ctx["s"]))
+    files = [f for f in git("diff", "--name-only", "--diff-filter=DMRT", f"{base}..HEAD").splitlines()
+             if is_test(f) and f in listed]
+    noted = {r[0].strip("` ") for t in tables(sec(ctx, spec)) for r in filled(t)}
+    return [f"{f}는 {after} 고치거나 지운 테스트 파일이다. '{spec['section']}' 표에 파일과 고친 이유를 쓴다"
+            for f in files if f not in noted]
+
+
 def applies(spec, kind):
     return (not spec.get("only") or kind in spec["only"]) and kind not in spec.get("skip", [])
 
@@ -245,18 +306,45 @@ REVIEW_SCHEMA = json.dumps({"type": "object", "properties": {
     "required": ["pass", "missing"]})
 
 
+def plan_diff(ctx):
+    """계획을 시작한 뒤의 코드 diff. 머리에 '변경 파일' 표와 다른 파일을 적는다"""
+    p, files_section = ctx["p"], ctx["cfg"]["project"]["files_section"]
+    start = p["entered"]["_start"]["commit"]
+    listed, changed = plan_files(ctx["s"]), changed_since(start)
+    code = sorted(f for f in changed if is_code(f))
+    target = listed or code
+    head = [f"# {ctx['pid']} 코드 diff ({start}..HEAD, 계획을 시작한 뒤의 커밋, '{files_section}' 표의 파일)",
+            f"# 표에 있는데 바뀌지 않은 파일: {', '.join(f for f in listed if f not in changed) or '없음'}",
+            f"# 표에 없는데 바뀐 코드 파일(다른 계획의 변경일 수 있다): {', '.join(f for f in code if f not in listed) or '없음'}",
+            ""]
+    return "\n".join(head) + (git("diff", f"{start}..HEAD", "--", *target) if target else "")
+
+
 def review_check(ctx, st):
+    """검토자 호출. review에 {diff}가 있으면 계획을 시작한 뒤의 코드 diff를 파일로 주고, diff가 바뀌어도 다시 검토한다"""
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
+    diff = plan_diff(ctx) if "{diff}" in st["review"] else ""
+    dh = hashlib.sha256(diff.encode("utf-8")).hexdigest()[:16] if diff else None
     rev = p.get("review", {}).get(state)
-    if rev and rev["hash"] == plan_hash(text, ctx["cfg"]) and rev["pass"]:
+    if rev and rev["hash"] == plan_hash(text, ctx["cfg"]) and rev["pass"] and rev.get("diff") == dh:
         return []
     model = st.get("review_model") or CFG["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
-    prompt = st["review"].format(plan=p["plan"], title=p["title"], kind=p["kind"], state=state)
-    result, meta = call_reviewer(prompt, model)
+    fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state}
+    if diff:
+        f = git_path(f"gate-review/{ctx['pid']}.diff")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(diff, encoding="utf-8")
+        try:
+            fields["diff"] = f.resolve().relative_to(ROOT).as_posix()
+        except ValueError:
+            fields["diff"] = f.resolve().as_posix()
+    result, meta = call_reviewer(st["review"].format(**fields), model)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta}
+    if dh:
+        p["review"][state]["diff"] = dh
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 
 

@@ -4,6 +4,7 @@
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,13 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "dynamic-stagegate-harness"
 PY = [sys.executable, "-X", "utf8"]
 ENV = {k: v for k, v in os.environ.items() if k != "GATE_REVIEW"} | {"PYTHONDONTWRITEBYTECODE": "1"}
+# 검토자 대신 쓰는 claude. 받은 지시문을 남기고 PASS를 돌려준다
+FAKE_CLAUDE = '''import json, os, sys
+prompt = sys.stdin.buffer.read().decode("utf-8")
+with open(os.environ["GATE_FAKE_LOG"], "a", encoding="utf-8") as f:
+    f.write(json.dumps(prompt) + "\\n")
+print(json.dumps({"structured_output": {"pass": True, "missing": []}, "session_id": "s", "total_cost_usd": 0}))
+'''
 
 
 def run(cmd, cwd, stdin=None, env=ENV):
@@ -38,7 +46,23 @@ class Repo(unittest.TestCase):
         return run(["git", *args], self.root)
 
     def gate(self, *args):
-        return run([*PY, ".gate/gate.py", *args], self.root)
+        return run([*PY, ".gate/gate.py", *args], self.root, env=getattr(self, "env", ENV))
+
+    def fake_reviewer(self):
+        """PATH 앞에 가짜 claude를 둔다. 받은 지시문은 self.prompts()로 읽는다"""
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "fake.py").write_text(FAKE_CLAUDE, encoding="utf-8")
+        if os.name == "nt":
+            (d / "claude.bat").write_text(f'@"{sys.executable}" "{d / "fake.py"}" %*\n', encoding="utf-8")
+        else:
+            (d / "claude").write_text(f'#!/bin/sh\nexec "{sys.executable}" "{d / "fake.py"}" "$@"\n', encoding="utf-8")
+            (d / "claude").chmod(0o755)
+        self.log = d / "prompts.jsonl"
+        self.env = ENV | {"PATH": str(d) + os.pathsep + ENV.get("PATH", ""), "GATE_FAKE_LOG": str(self.log)}
+
+    def prompts(self):
+        return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
 
     def install(self, *args, target=None):
         return run([*PY, str(PLUGIN / "scripts" / "install.py"), *args, "--target", str(target or self.root)], self.root)
@@ -132,12 +156,22 @@ class LintTest(Repo):
     def test_back과_unchanged는_앞_상태만_가리킨다(self):
         self.setup_harness()
         text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
-        text = text.replace('back = {VERIFY = ["FIX", "REPRO"]}', 'back = {FIX = ["VERIFY"]}')
+        text = text.replace('back = {VERIFY = ["FIX", "REPRO"], REVIEW = ["FIX", "REPRO"]}', 'back = {FIX = ["VERIFY"]}')
         text = text.replace('{check = "unchanged", state = "REPRO",', '{check = "unchanged", state = "VERIFY",')
         self.write("bad.toml", text)
         r = self.gate("lint", "--file", "bad.toml")
         self.assertIn("bugfix.back.FIX: VERIFY가 FIX보다 앞 상태가 아니다", r.stdout)
         self.assertIn("bugfix/FIX: unchanged가 가리키는 VERIFY가 이 종류에서 FIX보다 앞 상태가 아니다", r.stdout)
+
+    def test_review의_자리와_command의_use와_테스트_패턴을_본다(self):
+        self.setup_harness()
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        text = text.replace("{plan}과 계획을", "{plan}과 {nope} 계획을").replace('use = "affected"', 'use = "bogus"')
+        self.write("bad.toml", text.replace("\ntests = [", "\ntests_off = [", 1))
+        r = self.gate("lint", "--file", "bad.toml")
+        self.assertIn("REVIEW: review의 {nope}는 쓸 수 없는 자리다", r.stdout)
+        self.assertIn("chore/IMPLEMENT: command의 use는 test, affected 중 하나다(지금 bogus)", r.stdout)
+        self.assertIn("feature/TEST: test_edits를 쓰는데 [project] tests가 비었다", r.stdout)
 
 
 class FlowTest(Repo):
@@ -264,7 +298,7 @@ class FlowTest(Repo):
         self.assertIn("P001 b: VERIFY", self.gate("next", "P001").stdout)
 
     def test_back은_적어_둔_경로로만_가고_진단에_경로별로_남는다(self):
-        self.edit(".gate/config.toml", ('back = {VERIFY = ["FIX", "REPRO"]}', 'back = {VERIFY = ["FIX"]}'))
+        self.edit(".gate/config.toml", ('back = {VERIFY = ["FIX", "REPRO"], REVIEW', 'back = {VERIFY = ["FIX"], REVIEW'))
         self.git("add", ".gate/config.toml")
         self.assertEqual(self.git("commit", "-qm", "harness: back 경로").returncode, 0)
         self.assertIn("VERIFY --> FIX : back", self.gate("describe", "--mermaid").stdout)
@@ -274,6 +308,96 @@ class FlowTest(Repo):
         self.assertIn("VERIFY에서는 FIX로만 돌아갈 수 있다", r.stderr)
         self.assertEqual(self.gate("back", "P001", "FIX", "--why", "덜 고침").returncode, 0)
         self.assertIn("| bugfix | VERIFY | FIX | 1 | 덜 고침 |", self.gate("diagnose").stdout)
+
+    def test_실패해야_하는_명령이_테스트를_돌리지_못하면_막는다(self):
+        self.gate("start", "--kind", "bugfix", "--title", "b")
+        self.edit("plans/P001.md", ("- 증상:", "- 증상: x"), ("- 재현 명령:", "- 재현 명령: gate_no_such_cmd_xyz --run"))
+        self.assertIn("gate_no_such_cmd_xyz를 찾지 못했다", self.gate("next", "P001").stdout)
+        self.edit("plans/P001.md", ("gate_no_such_cmd_xyz --run", f'"{sys.executable}" -c "raise SystemExit(5)"'))
+        self.assertIn("테스트를 돌리지 못한 것으로 보인다(종료 코드 5)", self.gate("next", "P001").stdout)
+
+    def test_chore는_affected_명령에_계획의_파일을_넣어_돌린다(self):
+        self.edit(".gate/config.toml", ('affected = ""', 'affected = "git grep -q zzz -- {files}"'))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: affected").returncode, 0)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.write("src/a.py", "a = 2\n")
+        self.fill_chore("P001")
+        self.git("add", "src/a.py", "plans")
+        self.git("commit", "-qm", "feat: a")
+        r = self.gate("next", "P001")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("`git grep -q zzz -- src/a.py`가 통과해야 하는데", r.stdout)
+
+
+class FeatureTest(Repo):
+    """feature 경로 전체. 새 테스트는 tests/expect.txt의 패턴이 src/a.py에 있는지 본다"""
+    NEW = "git grep -q -f tests/expect.txt -- src/a.py"
+
+    def setUp(self):
+        super().setUp()
+        self.setup_harness()
+        self.fake_reviewer()
+
+    def commit(self, msg, *paths):
+        self.git("add", *paths)
+        r = self.git("commit", "-qm", msg)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def feature_to_test(self):
+        """SPEC부터 IMPLEMENT까지 지나 TEST에 두고 테스트 결과 표를 채운다"""
+        self.gate("start", "--kind", "feature", "--title", "f")
+        self.edit("plans/P001.md", ("## 요구사항\n", "## 요구사항\n\nok를 둔다.\n"),
+                  ("| 기준 | 확인 방법 |\n|---|---|", "| 기준 | 확인 방법 |\n|---|---|\n| ok가 있다 | 새 테스트 |"),
+                  ("## 범위 밖\n", "## 범위 밖\n\n없음\n"),
+                  ("| 파일 | 바꿀 내용 |\n|---|---|",
+                   "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | ok를 더함 |\n| tests/expect.txt | 기대값 |"),
+                  ("- 새 테스트 명령:", f"- 새 테스트 명령: {self.NEW}"), ("- 테스트 명령:", f"- 테스트 명령: {self.NEW}"),
+                  ("- 확인할 동작:", "- 확인할 동작: ok"), ("## 위험\n", "## 위험\n\n없음\n"))
+        self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("P001 f: TESTFIRST", self.gate("next", "P001", "--review").stdout)
+        self.write("tests/expect.txt", "ok\n")
+        self.commit("test: 기대값", "tests", "plans")
+        self.assertIn("P001 f: IMPLEMENT", self.gate("next", "P001").stdout)
+        self.write("src/a.py", "ok = 1\n")
+        self.commit("feat: ok", "src")
+        self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
+        self.edit("plans/P001.md", ("| 기준이나 동작 | 결과 |\n|---|---|", "| 기준이나 동작 | 결과 |\n|---|---|\n| ok가 있다 | 통과 |"))
+
+    def test_REVIEW는_계획을_시작한_뒤의_diff를_주고_코드가_바뀌면_다시_검토한다(self):
+        self.feature_to_test()
+        self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
+        self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+        self.assertIn("P001 f: RECORD", self.gate("next", "P001", "--review").stdout)
+        self.assertIn(".git/gate-review/P001.diff", self.prompts()[-1])
+        diff = (self.root / ".git" / "gate-review" / "P001.diff").read_text(encoding="utf-8")
+        self.assertIn("+ok = 1", diff)
+        self.assertIn("# 표에 있는데 바뀌지 않은 파일: 없음", diff)
+        self.gate("back", "P001", "REVIEW", "--why", "w")
+        self.assertIn("P001 f: RECORD", self.gate("next", "P001").stdout)  # 코드가 그대로면 앞 검토를 쓴다
+        self.gate("back", "P001", "IMPLEMENT", "--why", "w")
+        self.write("src/a.py", "ok = 2\n")
+        self.commit("feat: ok 2", "src")
+        self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
+        self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
+        self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+
+    def test_먼저_쓴_테스트를_고치면_표에_적어야_하고_구현한_뒤에도_TESTFIRST를_다시_지난다(self):
+        self.feature_to_test()
+        self.gate("back", "P001", "PLAN", "--why", "w")
+        self.assertIn("P001 f: TESTFIRST", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("P001 f: IMPLEMENT", self.gate("next", "P001").stdout)  # 같은 테스트로 실패를 확인했다
+        self.write("tests/expect.txt", "o\n")
+        self.commit("test: 기대값을 바꿈", "tests")
+        self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
+        r = self.gate("next", "P001")
+        self.assertIn("tests/expect.txt는 TESTFIRST를 넘긴 뒤 고치거나 지운 테스트 파일이다", r.stdout)
+        self.edit("plans/P001.md", ("| 파일 | 고친 이유 |\n|---|---|", "| 파일 | 고친 이유 |\n|---|---|\n| tests/expect.txt | 패턴을 줄임 |"))
+        self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
+        self.gate("back", "P001", "PLAN", "--why", "w")
+        self.gate("next", "P001", "--review")
+        r = self.gate("next", "P001")  # 테스트가 바뀌어 실패를 다시 확인해야 한다
+        self.assertIn("실패해야 하는데 종료 코드가 0", r.stdout)
 
 
 class GuardTest(Repo):

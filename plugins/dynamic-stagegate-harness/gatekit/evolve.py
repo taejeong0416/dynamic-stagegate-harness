@@ -9,6 +9,7 @@ import hashlib
 import re
 import shutil
 import statistics
+import string
 import time
 from datetime import datetime
 
@@ -23,7 +24,12 @@ MUST_PROTECT = (".gate/config.toml", ".gate/history/", ".gate/gatekit/")
 DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choice": "결정", "numbers": "값 근거"}
 # 검사가 기본값 없이 읽는 키
 REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
-            "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",)}
+            "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",),
+            "test_edits": ("section",)}
+# command의 use가 가리킬 수 있는 [project] 명령
+COMMAND_USE = ("test", "affected")
+# review 지시문에 쓸 수 있는 자리
+REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff"}
 
 
 # lint
@@ -90,7 +96,14 @@ def lint(cfg):
                 if missing:
                     bad.append(f"{kname}/{s}: {name}에 필요한 키가 없다: {', '.join(missing)}")
                     continue
-                uses_files |= name in ("files_listed", "files_changed", "numbers", "sample")
+                uses_files |= name in ("files_listed", "files_changed", "numbers", "sample", "test_edits")
+                if name == "command" and c.get("use") and c["use"] not in COMMAND_USE:
+                    bad.append(f"{kname}/{s}: command의 use는 {', '.join(COMMAND_USE)} 중 하나다(지금 {c['use']})")
+                if name == "test_edits":
+                    if not cfg["project"]["tests"]:
+                        bad.append(f"{kname}/{s}: test_edits를 쓰는데 [project] tests가 비었다")
+                    if c.get("state") and c["state"] not in states[:states.index(s)]:
+                        bad.append(f"{kname}/{s}: test_edits가 가리키는 {c['state']}가 이 종류에서 {s}보다 앞 상태가 아니다")
                 sec = c.get("section", DEFAULT_SECTION.get(name))
                 if name == "command" and not sec:
                     continue
@@ -115,6 +128,13 @@ def lint(cfg):
                             for x in c.get("sections", []) if x not in ts]
             if st.get("review") and not isinstance(st["review"], str):
                 bad.append(f"{s}: review는 문자열이다")
+            elif st.get("review"):
+                try:
+                    fields = {f for _, f, _, _ in string.Formatter().parse(st["review"]) if f is not None}
+                except ValueError as e:
+                    fields = {f"형식 오류 {e}"}
+                bad += [f"{s}: review의 {{{x}}}는 쓸 수 없는 자리다(쓸 수 있는 것: {', '.join(sorted(REVIEW_FIELDS))})"
+                        for x in sorted(fields - REVIEW_FIELDS)]
         if uses_files and cfg["project"]["files_section"] not in ts:
             bad.append(f"{kname}: 파일 검사를 쓰는데 files_section '{cfg['project']['files_section']}' 절이 계획 틀에 없다")
     for s in cfg["project"]["stop_states"]:

@@ -42,6 +42,10 @@ DEFAULTS = {
     "status_sections": [],
     "pre_commit": [],
     "test": "",
+    # 계획의 코드 파일이 영향을 주는 테스트만 돌리는 명령. {files}는 계획의 코드 파일로 바뀐다
+    "affected": "",
+    # 테스트 파일 패턴. test_edits 검사와 먼저 실패한 테스트 기록이 쓴다
+    "tests": [],
     # 하네스 점검 권장 기준. 근거 없이 정한 값
     "review_every_plans": 5,
     "review_every_events": 10,
@@ -175,6 +179,10 @@ def is_code(path):
 
 def is_protected(path):
     return match(path, P["protected"])
+
+
+def is_test(path):
+    return match(path, P["tests"])
 
 
 # git

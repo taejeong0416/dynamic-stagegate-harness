@@ -122,6 +122,7 @@ def cmd_next(a, flow):
             print("  - " + m)
         sys.exit(1)
     p.setdefault("passed", {})[state] = snapshot(s)
+    p.setdefault("first_passed", {}).setdefault(state, head())  # back으로 지우지 않는다. test_edits가 쓴다
     nxt, _ = next_state(cfg_for(p), p, s, state)
     if nxt != "DONE" and p.get("visits", {}).get(nxt, 0) >= P["max_visits"]:
         save(flow)
