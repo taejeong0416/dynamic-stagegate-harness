@@ -47,7 +47,7 @@ when의 조건 키는 option(켠 선택), changed(계획 시작 뒤 바뀐 파�
 
 | 장치 | 막는 경우 |
 |---|---|
-| guard (PreToolUse) | 코드 상태인 계획이 없는데 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit)을 직접 쓸 때. 상태를 gate 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때. hook을 우회할 때 |
+| guard (PreToolUse) | 코드 상태인 계획이 없는데 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit)과 git hook을 직접 쓸 때. 상태를 gate 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때. hook을 우회할 때 |
 | stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |

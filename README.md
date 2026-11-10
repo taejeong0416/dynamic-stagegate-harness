@@ -72,7 +72,7 @@ Python 3.11 이상과 git이 필요하다.
 
 - 설치할 때 목적 인터뷰로 프로젝트의 목적, 검증 방법, 작업 종류, 실패 비용을 정하고, 그에 맞춰 preset 구조를 조정한다.
 - `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 계획을 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르게 하거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
-- 코드 상태인 계획이 없으면 코드 편집을 막고, 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막는다. 구조 파일인 config.toml, history, gatekit은 직접 편집을 막는다.
+- 코드 상태인 계획이 없으면 코드 편집을 막고, 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막는다. 구조 파일인 config.toml, history, gatekit과 git hook을 직접 편집하는 것도 막는다.
 - 이 세션이 고친 코드나 하네스 파일에 커밋하지 않은 변경이 있거나, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있으면 턴을 끝내지 못하게 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는 막지 않는다.
 - SessionStart hook이 진행 중인 계획과 할 일을 컨텍스트에 넣고, 메시지마다 계획 목록이 한 줄씩 들어간다. 컨텍스트가 압축돼도 상태는 파일에 남아 있어서 다시 들어온다.
 - `gate describe --mermaid`가 지금 구조의 경로를 위와 같은 다이어그램으로 출력한다.
@@ -169,7 +169,10 @@ plugins/dynamic-stagegate-harness/
   GATE.md                             프로젝트에 복사되는 명령과 원칙 설명
   scripts/install.py                  설치와 엔진 갱신
   skills/setup, gate, evolve/         설치와 목적 인터뷰, 운영, 구조 다시 짜기
+tests/test_gate.py                    임시 저장소에 설치해 명령과 hook을 돌려 보는 테스트
 ```
+
+테스트는 저장소 루트에서 `python -X utf8 -m unittest discover tests`로 돌린다.
 
 설치한 프로젝트의 `.gate/`에는 config.toml(지금 구조), history/(앞 구조 버전), library/(빌려 쓸 구조), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
 
