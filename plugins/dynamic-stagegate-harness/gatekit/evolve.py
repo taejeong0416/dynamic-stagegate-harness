@@ -13,7 +13,7 @@ import string
 import time
 from datetime import datetime
 
-from .checks import CHECKS, call_reviewer
+from .checks import CHECKS, applies, call_reviewer
 from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
@@ -25,7 +25,7 @@ DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choic
 # 검사가 기본값 없이 읽는 키
 REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
             "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",),
-            "test_edits": ("section",)}
+            "test_edits": ("section",), "covers": ("section", "from")}
 # command의 use가 가리킬 수 있는 [project] 명령
 COMMAND_USE = ("test", "affected")
 # review 지시문에 쓸 수 있는 자리
@@ -107,7 +107,7 @@ def lint(cfg):
                 sec = c.get("section", DEFAULT_SECTION.get(name))
                 if name == "command" and not sec:
                     continue
-                for key in ("section", "options"):
+                for key in ("section", "options", "from"):
                     target = c.get(key, sec if key == "section" else None)
                     if target and target not in ts:
                         bad.append(f"{kname}/{s}: {name}이 가리키는 절 '{target}'이 계획 틀에 없다"
@@ -126,6 +126,10 @@ def lint(cfg):
                         bad.append(f"{kname}/{s}: unchanged가 가리키는 {c['state']}가 이 종류에서 {s}보다 앞 상태가 아니다")
                     bad += [f"{kname}/{s}: unchanged가 가리키는 절 '{x}'이 계획 틀에 없다"
                             for x in c.get("sections", []) if x not in ts]
+            if st.get("edit") not in (None, "tests"):
+                bad.append(f"{s}: edit는 \"tests\"만 쓸 수 있다(지금 {st['edit']})")
+            elif st.get("edit") and not (st.get("code") and cfg["project"]["tests"]):
+                bad.append(f"{s}: edit = \"tests\"는 code = true인 상태에 쓰고 [project] tests가 있어야 한다")
             if st.get("review") and not isinstance(st["review"], str):
                 bad.append(f"{s}: review는 문자열이다")
             elif st.get("review"):
@@ -164,6 +168,7 @@ def describe(cfg):
     lines.append("")
     for s, st in cfg["states"].items():
         flags = [x for x in ("code", "run") if st.get(x)] + (["review"] if st.get("review") else [])
+        flags += [f"edit={st['edit']}"] if st.get("edit") else []
         checks = ", ".join(c["check"] for c in st.get("checks", []))
         lines.append(f"- {s}{' (' + ', '.join(flags) + ')' if flags else ''}: {checks or '검사 없음'}")
     return "\n".join(lines)
@@ -196,7 +201,8 @@ def mermaid(cfg):
 
         def node(s):
             st = cfg["states"].get(s, {})
-            tags = [t for t, on in (("코드", st.get("code")), ("실행", st.get("run")), ("검토", st.get("review"))) if on]
+            code = "테스트 코드" if st.get("edit") == "tests" else "코드"
+            tags = [t for t, on in ((code, st.get("code")), ("실행", st.get("run")), ("검토", st.get("review"))) if on]
             return f'{s}["{s}<br>{", ".join(tags)}"]' if tags else s
 
         drawn = set()
@@ -341,17 +347,29 @@ def diagnose(flow):
     lines += ["", f"- 마지막 adopt 뒤 끝난 계획: {len(done)}개"]
     ev = read_events(since_ts)
     lines += ["", "## 막힌 기록(마지막 adopt 뒤)", ""]
-    if not ev:
-        lines.append("없음")
-    counts = {}
+    counts, misses = {}, {}
     for e in ev:
-        counts.setdefault(e["kind"], []).append(e["reason"])
+        if e["kind"] == "next":
+            m = misses.setdefault((e.get("plan_kind", ""), e.get("state", ""), e["reason"][:70]), [0, set()])
+            m[0] += 1
+            m[1].add(e.get("plan", ""))
+        else:
+            counts.setdefault(e["kind"], []).append(e["reason"])
+    if not counts:
+        lines.append("없음")
     for k, rs in sorted(counts.items(), key=lambda x: -len(x[1])):
         common = {}
         for r in rs:
             common[r[:70]] = common.get(r[:70], 0) + 1
         top = sorted(common.items(), key=lambda x: -x[1])[:3]
         lines.append(f"- {k} {len(rs)}회: " + "; ".join(f"{r} ({n}회)" for r, n in top))
+    lines += ["", "## next에서 막힌 이유(마지막 adopt 뒤)", ""]
+    if misses:
+        lines += ["| 종류 | 상태 | 이유 | 횟수 | 계획 |", "|---|---|---|---|---|"]
+        lines += [f"| {k} | {s} | {r.replace('|', '/')} | {n} | {', '.join(sorted(ps))} |"
+                  for (k, s, r), (n, ps) in sorted(misses.items(), key=lambda x: -x[1][0])[:15]]
+    else:
+        lines.append("없음")
     lines += ["", "## 저장소 변화(마지막 adopt 뒤)", ""]
     if since_commit:
         added = [l.split("\t")[-1] for l in git("diff", "--name-status", f"{since_commit}..HEAD").splitlines()
@@ -404,10 +422,45 @@ def replay(flow, new):
     return out if len(out) > n0 else out + ["- 차이가 나는 계획 없음"]
 
 
+def _spec_text(c):
+    return c["check"] + "(" + ", ".join(f"{k}={v}" for k, v in c.items() if k != "check") + ")"
+
+
+def weakened(old, new):
+    """새 구조에서 빠지거나 풀리는 것. 종류, 상태, 검사, 검토, 테스트만 쓰는 제한, 건너뛰는 조건, 상한"""
+    out = []
+    for kname, k in old["kinds"].items():
+        nk = new["kinds"].get(kname)
+        if nk is None:
+            out.append(f"{kname}: 종류가 없어진다")
+            continue
+        for s in k["states"]:
+            if s not in nk["states"]:
+                out.append(f"{kname}: 상태 {s}가 빠진다")
+                continue
+            o, n, where = old["states"].get(s, {}), new["states"].get(s, {}), f"{kname}/{s}"
+            kept = [c for c in n.get("checks", []) if applies(c, kname)]
+            out += [f"{where}: 검사 {_spec_text(c)}가 빠지거나 바뀐다" for c in o.get("checks", [])
+                    if applies(c, kname) and c not in kept]
+            if o.get("review") and not n.get("review"):
+                out.append(f"{where}: 검토가 빠진다")
+            elif o.get("review") != n.get("review") and o.get("review"):
+                out.append(f"{where}: 검토 지시문이 바뀐다")
+            if n.get("code") and not o.get("code"):
+                out.append(f"{where}: 코드 편집이 열린다")
+            if o.get("edit") and n.get("edit") != o.get("edit"):
+                out.append(f"{where}: 테스트 파일만 고치는 제한이 풀린다")
+            if s in nk.get("when", {}) and nk["when"][s] != k.get("when", {}).get(s):
+                out.append(f"{where}: 건너뛰는 조건이 붙거나 바뀐다({fmt_cond(nk['when'][s])})")
+        if k.get("limit") and nk.get("limit") != k["limit"]:
+            out.append(f"{kname}: 상한이 빠지거나 바뀐다({fmt_cond(k['limit'])})")
+    return out
+
+
 REVIEW = ("하네스 구조 변경 제안서 {path}를 검토한다. 지금 구조 .gate/config.toml, 목적 .gate/PROFILE.md(없으면 건너뛴다), "
-          "진단과 검사 결과 {diag}를 읽는다. 다음을 찾는다. (1) 상태나 검사를 빼거나 약하게 하는데 '바꾸는 것' 표의 근거가 "
-          "진단 자료의 수치나 PROFILE과 맞지 않거나 없는 것 (2) PROFILE의 목적과 어긋나는 변경 (3) 근거 없이 넣은 새 상태나 "
-          "경로 (4) '진행 중인 계획' 절이 재생 결과와 다른 것.")
+          "진단과 검사 결과 {diag}를 읽는다. 다음을 찾는다. (1) 진단 파일의 '빼거나 푸는 변경' 항목 가운데 '바꾸는 것' 표에 "
+          "근거가 없거나 근거가 진단 자료의 수치나 PROFILE과 맞지 않는 것 (2) PROFILE의 목적과 어긋나는 변경 (3) 근거 없이 "
+          "넣은 새 상태나 경로 (4) '진행 중인 계획' 절이 재생 결과와 다른 것.")
 
 
 def check_proposal(flow, hid, allow_review):
@@ -438,7 +491,9 @@ def check_proposal(flow, hid, allow_review):
     diff = "".join(difflib.unified_diff(cur.splitlines(True), (raw + "\n").splitlines(True), "지금 config.toml",
                                         "새 구조"))
     diag = PROPOSALS / f"{hid}.diag.md"
-    diag.write_text("\n".join([diagnose(flow), "", "## lint", "", *(problems or ["문제 없음"]), "", "## 지난 계획 재생", "",
+    loose = [f"- {x}" for x in weakened(CFG, new)] or ["없음"]
+    diag.write_text("\n".join([diagnose(flow), "", "## lint", "", *(problems or ["문제 없음"]), "", "## 빼거나 푸는 변경", "",
+                               *loose, "", "## 지난 계획 재생", "",
                                *replay(flow, new), "", "## 새 구조 경로", "", describe(new), "", mermaid(new),
                                "## diff", "",
                                "```diff", diff, "```", ""]), encoding="utf-8")
@@ -491,7 +546,7 @@ def review_due(flow):
     done = sum(1 for p in flow["plans"].values() if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since)
     if done >= CFG["project"]["review_every_plans"]:
         why.append(f"마지막 구조 변경 뒤 계획 {done}개가 끝났다")
-    ev = len(read_events(since))
+    ev = sum(1 for e in read_events(since) if e["kind"] != "next")
     if ev >= CFG["project"]["review_every_events"]:
         why.append(f"마지막 구조 변경 뒤 hook이 {ev}번 막았다")
     if CFG["stages"] and hz.get("stage") != flow.get("stage"):

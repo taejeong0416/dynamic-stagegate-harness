@@ -136,10 +136,10 @@ def next_state(cfg, p, s, after):
 
 # 이벤트 기록(하네스 점검 자료). git 폴더에 두어 커밋되지 않는다
 
-def log_event(kind, reason):
+def log_event(kind, reason, **extra):
     try:
         with open(git_path("gate-events.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200]},
+            f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200], **extra},
                                ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -245,6 +245,16 @@ def state_def(p):
 
 def code_open(flow):
     return any(state_def(p).get("code") for p in flow["plans"].values() if p["state"] not in CLOSED)
+
+
+def tests_only(flow, path):
+    """코드 상태인 계획이 모두 테스트만 쓰는 상태(edit = "tests")이고 path가 테스트 파일이 아니면 막는 이유"""
+    plans = {pid: p for pid, p in flow["plans"].items() if p["state"] not in CLOSED and state_def(p).get("code")}
+    if not plans or is_test(path) or any(state_def(p).get("edit") != "tests" for p in plans.values()):
+        return None
+    where = ", ".join(f"{pid} {p['state']}" for pid, p in plans.items())
+    return (f"코드를 고치는 계획이 테스트만 쓰는 상태({where})라 테스트 파일이 아닌 {path}를 막았다. "
+            "구현 코드는 next로 다음 상태에 간 뒤에 쓴다.")
 
 
 def run_open(flow):

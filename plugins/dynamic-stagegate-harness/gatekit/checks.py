@@ -47,6 +47,16 @@ def table(ctx, spec):
 
 
 @check
+def covers(ctx, spec):
+    """from 절 표의 첫 칸이 모두 section 절 표의 첫 칸에 있다. 수용 기준마다 결과를 적었는지 본다"""
+    def firsts(name):
+        return [" ".join(r[0].split()) for t in tables(ctx["s"].get(name, [])) for r in filled(t)]
+    have = set(firsts(spec["section"]))
+    return [f"'{spec['from']}' 표의 '{x}'가 '{spec['section']}' 표 첫 칸에 없다. 기준마다 한 행씩 그대로 옮겨 적는다"
+            for x in firsts(spec["from"]) if x not in have]
+
+
+@check
 def files_listed(ctx, spec):
     """계획이 고칠 코드 파일을 적었다"""
     return [] if plan_files(ctx["s"]) else [f"'{CFG['project']['files_section']}' 절에 config의 code 패턴에 맞는 파일이 없다"]

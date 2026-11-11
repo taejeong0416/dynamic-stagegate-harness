@@ -173,6 +173,15 @@ class LintTest(Repo):
         self.assertIn("chore/IMPLEMENT: command의 use는 test, affected 중 하나다(지금 bogus)", r.stdout)
         self.assertIn("feature/TEST: test_edits를 쓰는데 [project] tests가 비었다", r.stdout)
 
+    def test_edit는_코드_상태에만_쓰고_covers는_절을_가리킨다(self):
+        self.setup_harness()
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        text = text.replace('[states.TEST]\n', '[states.TEST]\nedit = "tests"\n').replace('from = "수용 기준"', 'from = "없는 절"')
+        self.write("bad.toml", text)
+        r = self.gate("lint", "--file", "bad.toml")
+        self.assertIn('TEST: edit = "tests"는 code = true인 상태에 쓰고', r.stdout)
+        self.assertIn("feature/TEST: covers이 가리키는 절 '없는 절'이 계획 틀에 없다", r.stdout)
+
 
 class FlowTest(Repo):
     def setUp(self):
@@ -279,8 +288,7 @@ class FlowTest(Repo):
         self.edit("plans/P001.md", ("- 증상:", "- 증상: 표시가 없다"),
                   ("- 재현 명령:", "- 재현 명령: git grep -q FIXED -- src/a.py"),
                   ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 표시를 더함 |"))
-        self.write("src/a.py", "a = 2\n")
-        self.git("add", "src/a.py", "plans")
+        self.git("add", "plans")
         self.assertEqual(self.git("commit", "-qm", "test: 재현").returncode, 0)
         self.assertIn("P001 b: FIX", self.gate("next", "P001").stdout)
         self.write("src/a.py", "a = 2  # FIXED\n")
@@ -382,6 +390,31 @@ class FeatureTest(Repo):
         self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
 
+    def test_수용_기준마다_테스트_결과가_있어야_하고_막힌_이유가_진단에_남는다(self):
+        self.feature_to_test()
+        self.edit("plans/P001.md", ("| ok가 있다 | 통과 |", "| ok | 통과 |"))
+        r = self.gate("next", "P001")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("'수용 기준' 표의 'ok가 있다'가 '테스트 결과' 표 첫 칸에 없다", r.stdout)
+        self.assertIn("| feature | TEST | '수용 기준' 표의 'ok가 있다'가", self.gate("diagnose").stdout)
+        self.edit("plans/P001.md", ("| ok | 통과 |", "| ok가  있다 | 통과 |"))
+        self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
+
+    def test_제안서_진단에_빼거나_푸는_변경이_나온다(self):
+        cfg = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        new = cfg.replace("version = 1", "version = 2", 1)
+        new = new.replace('\n# 테스트 파일([project] tests)만 고치고 커밋할 수 있다\nedit = "tests"', "", 1)
+        new = new.replace('  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"]},\n', "")
+        self.assertIn('[states.REPRO]\ncode = true\nedit = "tests"', new)
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| covers 빼기 | 없음 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n\n## 새 구조\n\n```toml\n" + new + "\n```\n")
+        self.gate("check-proposal", "H001")
+        diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        self.assertIn("- feature/TEST: 검사 covers(section=테스트 결과, from=수용 기준, only=['feature'])가 빠지거나 바뀐다",
+                      diag)
+        self.assertIn("- feature/TESTFIRST: 테스트 파일만 고치는 제한이 풀린다", diag)
+        self.assertNotIn("bugfix/REPRO", diag)
+
     def test_먼저_쓴_테스트를_고치면_표에_적어야_하고_구현한_뒤에도_TESTFIRST를_다시_지난다(self):
         self.feature_to_test()
         self.gate("back", "P001", "PLAN", "--why", "w")
@@ -416,6 +449,21 @@ class GuardTest(Repo):
     def test_코드_상태인_계획이_있으면_코드_편집이_열린다(self):
         self.gate("start", "--kind", "chore", "--title", "t")
         self.assertIsNone(self.guard("Write", file_path=self.path("src/a.py")))
+
+    def test_테스트만_쓰는_상태에서는_테스트_파일만_고치고_커밋한다(self):
+        self.gate("start", "--kind", "bugfix", "--title", "b")
+        self.assertIn("테스트만 쓰는 상태(P001 REPRO)", self.guard("Write", file_path=self.path("src/a.py")))
+        self.assertIn("테스트만 쓰는 상태(P001 REPRO)", self.guard("Bash", command="echo 1 > src/b.py"))
+        self.assertIsNone(self.guard("Write", file_path=self.path("tests/test_a.py")))
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|",
+                                    "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 고침 |\n| tests/test_a.py | 재현 |"))
+        self.write("src/a.py", "a = 2\n")
+        self.write("tests/test_a.py", "x\n")
+        self.git("add", "src", "tests", "plans")
+        r = self.git("commit", "-qm", "test: 재현")
+        self.assertIn("src/a.py: P001 REPRO에서는 테스트 파일만 커밋한다", r.stdout + r.stderr)
+        self.git("reset", "-q", "src/a.py")
+        self.assertEqual(self.git("commit", "-qm", "test: 재현").returncode, 0)
 
     def test_구조_파일과_상태_파일과_git_hook은_직접_쓰지_못한다(self):
         for rel in (".gate/config.toml", ".gate/gatekit/core.py", ".gate/state.json", ".githooks/pre-commit",

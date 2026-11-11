@@ -133,6 +133,8 @@ review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 프롬
 
 [states.EVALSET]
 code = true
+# 테스트 파일([project] tests)만 고치고 커밋할 수 있다
+edit = "tests"
 sections = ["변경 파일", "평가"]
 todo = [
   "목표 동작을 확인할 eval 케이스를 evals/에 쓰고 \"변경 파일\" 표에 넣는다.",
@@ -179,6 +181,7 @@ checks = [
 
 [states.REPRO]
 code = true
+edit = "tests"
 sections = ["재현", "변경 파일"]
 todo = [
   "\"재현\" 절에 증상과 재현 명령을 쓴다. 재현 명령은 지금 실패해야 한다.",

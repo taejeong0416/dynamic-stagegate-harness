@@ -135,9 +135,11 @@ review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 코드
 
 [states.TESTFIRST]
 code = true
+# 테스트 파일([project] tests)만 고치고 커밋할 수 있다
+edit = "tests"
 sections = ["테스트 계획"]
 todo = [
-  "수용 기준마다 테스트를 먼저 쓰고 \"변경 파일\" 표에 넣는다. 구현 코드는 아직 쓰지 않는다.",
+  "수용 기준마다 테스트를 먼저 쓰고 \"변경 파일\" 표에 넣는다. 이 상태에서는 테스트 파일만 고칠 수 있다.",
   "테스트를 커밋한다. \"새 테스트 명령\"이 지금 실패해야 넘어간다(구현 전이라 실패하는 게 맞다).",
 ]
 checks = [
@@ -166,7 +168,7 @@ checks = [
 sections = ["테스트 결과", "테스트 수정"]
 todo = [
   "새 테스트 명령과 전체 테스트 명령([project] test, 비었으면 \"테스트 계획\"의 테스트 명령)을 돌린다.",
-  "\"테스트 결과\" 표에 기준이나 동작마다 결과를 쓴다.",
+  "\"테스트 결과\" 표에 기준이나 동작마다 결과를 쓴다. feature는 \"수용 기준\" 표의 기준을 첫 칸에 그대로 옮긴다.",
 ]
 checks = [
   {check = "clean"},
@@ -177,10 +179,12 @@ checks = [
   {check = "command", section = "테스트 계획", item = "새 테스트 명령", only = ["feature"]},
   {check = "command", use = "test", section = "테스트 계획", item = "테스트 명령"},
   {check = "table", section = "테스트 결과"},
+  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"]},
 ]
 
 [states.REPRO]
 code = true
+edit = "tests"
 sections = ["재현", "변경 파일"]
 todo = [
   "\"재현\" 절에 증상과 재현 명령을 쓴다. 재현 명령은 지금 실패해야 한다.",

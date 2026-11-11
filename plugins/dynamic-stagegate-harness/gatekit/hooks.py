@@ -66,8 +66,8 @@ def rel(path, root):
 # guard
 
 def guard(inp):
-    from .core import (ROOT, STATE, code_open, dirty_code, is_code, is_protected, load, remote_on, run_open, LAUNCH,
-                       UPLOAD)
+    from .core import (ROOT, STATE, code_open, dirty_code, is_code, is_protected, load, remote_on, run_open, tests_only,
+                       LAUNCH, UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
     if tool in EDIT_TOOLS:
@@ -83,6 +83,8 @@ def guard(inp):
         if is_code(path) and not code_open(load()):
             deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .gate/gate.py status로 상태를 보고, "
                  "계획을 시작하거나 next로 코드 상태까지 진행한다.")
+        if is_code(path) and tests_only(load(), path):
+            deny(tests_only(load(), path))
         return
     if tool not in ("Bash", "PowerShell"):
         return
@@ -104,6 +106,8 @@ def guard(inp):
             deny(f"{m.group(2)}는 하네스 구조 파일이라 셸로 쓰지 않는다. 제안서와 adopt로 바꾼다.")
         if is_code(m.group(2)) and not code_open(flow):
             deny(f"코드를 고치는 상태인 계획이 없어 셸로 {m.group(2)}를 쓰는 것을 막았다.")
+        if is_code(m.group(2)) and tests_only(flow, m.group(2)):
+            deny(tests_only(flow, m.group(2)))
     if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd)):
         d = dirty_code()
         if d:

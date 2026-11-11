@@ -8,9 +8,9 @@ from pathlib import Path
 
 from . import evolve
 from .checks import run_checks
-from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, cond_holds, git, head, is_code, is_harness, load,
-                   next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot, state_def,
-                   structure_problems, template_text)
+from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, cond_holds, git, head, is_code, is_harness, is_test,
+                   load, log_event, next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot,
+                   state_def, structure_problems, template_text)
 
 CLI = "python -X utf8 .gate/gate.py"
 
@@ -120,6 +120,8 @@ def cmd_next(a, flow):
         print(f"{pid} {state}에서 넘어가지 못했다. 빠진 것:")
         for m in miss:
             print("  - " + m)
+            if not m.startswith("검토자 호출"):  # 하네스 점검 자료. --review로 다시 부르라는 안내는 뺀다
+                log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state)
         sys.exit(1)
     p.setdefault("passed", {})[state] = snapshot(s)
     p.setdefault("first_passed", {}).setdefault(state, head())  # back으로 지우지 않는다. test_edits가 쓴다
@@ -231,15 +233,22 @@ def cmd_pre_commit(a, flow):
     fail = []
     code = [f for f in staged() if f and is_code(f)]
     if code:
-        allowed = set()
+        allowed, tests_state = set(), {}
         for pid, p in flow["plans"].items():
             if p["state"] not in CLOSED and state_def(p).get("code"):
                 s = sections(plan_text(p))
-                allowed |= set(plan_files(s))
-                if set(code) & set(plan_files(s)) and limit_problem(p, s):
+                files = plan_files(s)
+                if state_def(p).get("edit") == "tests":
+                    tests_state |= {f: f"{pid} {p['state']}" for f in files if not is_test(f)}
+                    files = [f for f in files if is_test(f)]
+                allowed |= set(files)
+                if set(code) & set(files) and limit_problem(p, s):
                     fail.append(f"{pid}: {limit_problem(p, s)}")
-        fail += [f"{f}: 코드를 고치는 상태인 계획의 '{P['files_section']}' 절에 없는 파일이다" for f in code
-                 if f not in allowed]
+        for f in code:
+            if f in allowed:
+                continue
+            fail.append(f"{f}: {tests_state[f]}에서는 테스트 파일만 커밋한다" if f in tests_state else
+                        f"{f}: 코드를 고치는 상태인 계획의 '{P['files_section']}' 절에 없는 파일이다")
     for cmd in P["pre_commit"]:
         r = subprocess.run(cmd, shell=True, cwd=ROOT)
         if r.returncode != 0:
