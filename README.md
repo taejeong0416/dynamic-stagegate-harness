@@ -15,30 +15,34 @@ Claude Code 에이전트의 작업을 단계로 나누고 단계마다 넘어가
 
 ## 동작 방식
 
-service preset의 feature 작업은 아래 경로를 지난다. 검토 표시가 있는 상태는 읽기 도구만 쓰는 별도 Claude 호출인 검토자가 PASS를 줘야 넘어가고, 코드 표시가 있는 상태에서만 코드 편집과 커밋이 열린다. 넘어가는 조건을 채우지 못하면 그 상태에 머문다. 앞 상태에서 정한 내용이 틀렸으면 `back` 명령으로 되돌아가는데, 종류마다 적어 둔 경로로만 갈 수 있다.
+service preset의 feature 작업은 아래 경로를 지난다. 검토 표시가 있는 상태는 읽기 도구만 쓰는 별도 Claude 호출인 검토자가 PASS를 줘야 넘어가고, 코드 표시가 있는 상태에서만 코드 편집과 커밋이 열린다. 넘어가는 조건을 채우지 못하면 그 상태에 머문다. 앞 상태에서 정한 내용이 틀렸으면 `back` 명령으로 되돌아가는데, 종류마다 적어 둔 경로로만 갈 수 있다. 다이어그램의 점선이 그 경로이고, 점선 상자로 묶은 TEST와 REVIEW는 둘 다 IMPLEMENT, PLAN, SPEC으로 돌아갈 수 있다.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    state "SPEC<br>검토" as SPEC
-    state "PLAN<br>검토" as PLAN
-    state "TESTFIRST<br>코드" as TESTFIRST
-    state "IMPLEMENT<br>코드" as IMPLEMENT
-    state "REVIEW<br>검토" as REVIEW
-    [*] --> SPEC
+flowchart LR
+    start(( ))
+    done((( )))
+    SPEC["SPEC<br>검토"]
+    PLAN["PLAN<br>검토"]
+    TESTFIRST["TESTFIRST<br>코드"]
+    IMPLEMENT["IMPLEMENT<br>코드"]
+    subgraph back0 [" "]
+        direction LR
+        TEST
+        REVIEW["REVIEW<br>검토"]
+    end
+    style back0 fill:none,stroke:#999,stroke-dasharray:4 3
+    RECORD
+    start --> SPEC
     SPEC --> PLAN
     PLAN --> TESTFIRST
     TESTFIRST --> IMPLEMENT
     IMPLEMENT --> TEST
     TEST --> REVIEW
     REVIEW --> RECORD
-    RECORD --> [*]
-    TEST --> IMPLEMENT : back
-    TEST --> PLAN : back
-    TEST --> SPEC : back
-    REVIEW --> IMPLEMENT : back
-    REVIEW --> PLAN : back
-    REVIEW --> SPEC : back
+    RECORD --> done
+    back0 -.-> IMPLEMENT
+    back0 -.-> PLAN
+    back0 -.-> SPEC
 ```
 
 TESTFIRST는 구현 전에 쓴 테스트가 실패해야 넘어가고, TEST는 그 테스트와 프로젝트 테스트 명령이 통과해야 넘어간다. TEST는 SPEC에서 검토받은 절과 TESTFIRST에서 실패했던 새 테스트 명령이 그 뒤에 바뀌지 않았는지 본다. TESTFIRST에서 쓴 테스트 파일을 그 뒤에 고쳤으면 "테스트 수정" 표에 이유가 적혀 있어야 TEST가 넘어간다. REVIEW의 검토자는 계획을 시작한 뒤의 코드 diff를 받아 계획 파일과 견주고, 고친 테스트가 약해졌는지도 본다. 에이전트가 순서를 건너뛰면 다음처럼 막히고, 막힌 이유와 다음에 할 일을 같이 받는다.
@@ -80,7 +84,7 @@ Python 3.11 이상과 git이 필요하다.
 
 - 설치할 때 목적 인터뷰로 프로젝트의 목적, 검증 방법, 작업 종류, 실패 비용을 정하고, 그에 맞춰 preset 구조를 조정한다.
 - `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 계획을 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르게 하거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
-- 종류의 `back`에 되돌아가는 경로를 적어 두면 그 경로로만 돌아가고, 경로는 다이어그램과 진단에 하나씩 나온다.
+- 종류의 `back`에 되돌아가는 경로를 적어 두면 그 경로로만 돌아가고, 경로는 다이어그램에 점선으로, 진단에 경로별 횟수로 나온다.
 - `unchanged` 검사는 상태를 넘길 때 절 내용을 기록해 두고 뒤 상태에서 그 내용이 바뀌었으면 막는다. 실패했던 테스트 명령이나 검토받은 수용 기준을 나중에 고쳐서 통과하지 못한다.
 - `test_edits` 검사는 먼저 쓴 테스트, 재현 테스트, 고정한 eval 케이스, refactor 전의 테스트를 고치거나 지운 계획을 막는다. 고친 파일과 이유를 "테스트 수정" 표에 쓰면 넘어가고, service의 REVIEW 검토자가 그 변경을 다시 본다.
 - 실패해야 하는 명령은 테스트를 돌리지 못한 경우를 실패로 치지 않는다. 명령의 프로그램을 찾지 못하거나 종료 코드가 4, 5, 126, 127이면 막는다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않아서, 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 넘어갈 수 있다.
@@ -114,31 +118,35 @@ Python 3.11 이상과 git이 필요하다.
 앞 구조는 `.gate/history/`에 남고, 진행 중인 계획은 시작할 때의 구조 버전을 끝까지 쓴다. 아래는 마이그레이션 단계와 작은 작업용 선택을 더한 뒤의 feature 경로 예시다.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    state "SPEC<br>검토" as SPEC
-    state "PLAN<br>검토" as PLAN
-    state "TESTFIRST<br>코드" as TESTFIRST
-    state "IMPLEMENT<br>코드" as IMPLEMENT
-    state "MIGRATE<br>코드" as MIGRATE
-    state "REVIEW<br>검토" as REVIEW
-    [*] --> SPEC : --with quick 아님
-    [*] --> PLAN : SPEC 건너뜀
+flowchart LR
+    start(( ))
+    done((( )))
+    SPEC["SPEC<br>검토"]
+    PLAN["PLAN<br>검토"]
+    TESTFIRST["TESTFIRST<br>코드"]
+    IMPLEMENT["IMPLEMENT<br>코드"]
+    MIGRATE["MIGRATE<br>코드"]
+    subgraph back0 [" "]
+        direction LR
+        TEST
+        REVIEW["REVIEW<br>검토"]
+    end
+    style back0 fill:none,stroke:#999,stroke-dasharray:4 3
+    RECORD
+    start -->|"--with quick 아님"| SPEC
+    start -->|"SPEC 건너뜀"| PLAN
     SPEC --> PLAN
     PLAN --> TESTFIRST
     TESTFIRST --> IMPLEMENT
-    IMPLEMENT --> MIGRATE : migrations/ 변경
-    IMPLEMENT --> TEST : MIGRATE 건너뜀
+    IMPLEMENT -->|"migrations/* 변경"| MIGRATE
+    IMPLEMENT -->|"MIGRATE 건너뜀"| TEST
     MIGRATE --> TEST
     TEST --> REVIEW
     REVIEW --> RECORD
-    RECORD --> [*]
-    TEST --> IMPLEMENT : back
-    TEST --> PLAN : back
-    TEST --> SPEC : back
-    REVIEW --> IMPLEMENT : back
-    REVIEW --> PLAN : back
-    REVIEW --> SPEC : back
+    RECORD --> done
+    back0 -.-> IMPLEMENT
+    back0 -.-> PLAN
+    back0 -.-> SPEC
 ```
 
 ## 넘어가는 조건

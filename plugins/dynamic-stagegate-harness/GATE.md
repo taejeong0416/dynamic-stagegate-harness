@@ -2,7 +2,7 @@
 
 작업 하나는 계획 파일 하나와 정해진 상태 경로를 가진다. 상태마다 할 일과 넘어가는 조건이 있고, 조건은 `.gate/gate.py next`가 계획 파일, git 기록, 테스트나 eval 명령, 결과 파일로 검사한다. 판단이 필요한 상태는 `next --review`로 부른 검토자가 PASS를 줘야 넘어가고, 검토자는 읽기 도구만 쓰는 별도 Claude 호출이다.
 
-종류, 상태 경로, 상태별 검사로 된 지금 구조는 `python -X utf8 .gate/gate.py describe`가 `.gate/config.toml`에서 바로 출력하고, `describe --mermaid`는 종류마다 경로를 Mermaid 상태 다이어그램으로 출력한다. 프로젝트의 목적과 검증 방법은 `.gate/PROFILE.md`에 있다.
+종류, 상태 경로, 상태별 검사로 된 지금 구조는 `python -X utf8 .gate/gate.py describe`가 `.gate/config.toml`에서 바로 출력하고, `describe --mermaid`는 종류마다 경로를 Mermaid flowchart로 출력한다. 점선은 back으로 돌아가는 경로이고, 점선 상자로 묶인 상태들은 같은 상태로 돌아간다. 프로젝트의 목적과 검증 방법은 `.gate/PROFILE.md`에 있다.
 
 ## 작업 명령
 
