@@ -301,7 +301,7 @@ class FlowTest(Repo):
         self.edit(".gate/config.toml", ('back = {VERIFY = ["FIX", "REPRO"], REVIEW', 'back = {VERIFY = ["FIX"], REVIEW'))
         self.git("add", ".gate/config.toml")
         self.assertEqual(self.git("commit", "-qm", "harness: back 경로").returncode, 0)
-        self.assertIn("VERIFY --> FIX : back", self.gate("describe", "--mermaid").stdout)
+        self.assertIn("VERIFY -.-> FIX", self.gate("describe", "--mermaid").stdout)
         self.bugfix_to_fix()
         self.assertEqual(self.gate("next", "P001").returncode, 0)
         r = self.gate("back", "P001", "REPRO", "--why", "w")

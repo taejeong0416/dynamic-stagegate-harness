@@ -169,36 +169,82 @@ def describe(cfg):
     return "\n".join(lines)
 
 
+def _back_groups(states, back):
+    """back 대상이 같은 연속한 상태끼리 묶는다. [(상태 목록, 대상 목록)]"""
+    groups = []
+    for s in states:
+        targets = back.get(s)
+        if not targets:
+            continue
+        prev = groups[-1] if groups else None
+        if prev and prev[1] == targets and states.index(prev[0][-1]) == states.index(s) - 1:
+            prev[0].append(s)
+        else:
+            groups.append(([s], targets))
+    return groups
+
+
 def mermaid(cfg):
-    """종류마다 상태 경로를 Mermaid 상태 다이어그램으로. 조건이 붙은 상태는 건너뛰는 화살표를, back에 적은
-    되돌아가는 경로는 back 화살표를 같이 그린다"""
+    """종류마다 상태 경로를 Mermaid flowchart로. 조건이 붙은 상태는 건너뛰는 화살표를 같이 그리고, back에 적은
+    되돌아가는 경로는 점선으로 그린다. 돌아갈 대상이 같은 연속한 상태는 한 상자로 묶어 점선을 대상마다 하나만 그린다"""
     out = []
     for kname, k in cfg["kinds"].items():
         states, when = k["states"], k.get("when", {})
-        lines = ["stateDiagram-v2", "    direction LR"]
-        for s in states:
+        groups = _back_groups(states, k.get("back", {}))
+        boxed = {s: f"back{i}" for i, (members, _) in enumerate(groups) if len(members) > 1 for s in members}
+        lines = ["flowchart LR", "    start(( ))", "    done((( )))"]
+
+        def node(s):
             st = cfg["states"].get(s, {})
             tags = [t for t, on in (("코드", st.get("code")), ("실행", st.get("run")), ("검토", st.get("review"))) if on]
-            if tags:
-                lines.append(f'    state "{s}<br>{", ".join(tags)}" as {s}')
+            return f'{s}["{s}<br>{", ".join(tags)}"]' if tags else s
+
+        drawn = set()
+        for s in states:
+            box = boxed.get(s)
+            if not box:
+                lines.append(f"    {node(s)}")
+            elif box not in drawn:
+                drawn.add(box)
+                lines += [f'    subgraph {box} [" "]', "        direction LR",
+                          *[f"        {node(x)}" for x in states if boxed.get(x) == box], "    end",
+                          f"    style {box} fill:none,stroke:#999,stroke-dasharray:4 3"]
         for i in range(len(states) + 1):
-            src = states[i - 1] if i else "[*]"
+            src = states[i - 1] if i else "start"
             skipped = []
-            for dst in states[i:] + ["[*]"]:
+            for dst in states[i:] + ["done"]:
                 if skipped:
-                    label = f" : {', '.join(skipped)} 건너뜀"
+                    label = f"{', '.join(skipped)} 건너뜀"
                 elif dst in when:
-                    label = " : " + re.sub(r"[\[\]'\"]", "", fmt_cond(when[dst]))
+                    label = _cond_label(when[dst])
                 else:
                     label = ""
-                lines.append(f"    {src} --> {dst}{label}")
+                lines.append(f'    {src} -->|"{label}"| {dst}' if label else f"    {src} --> {dst}")
                 if dst not in when:
                     break
                 skipped.append(dst)
-        for s, targets in k.get("back", {}).items():
-            lines += [f"    {s} --> {t} : back" for t in targets]
+        for members, targets in groups:
+            src = boxed.get(members[0], members[0])
+            lines += [f"    {src} -.-> {t}" for t in targets]
         out += [f"### {kname}", "", "```mermaid", *lines, "```", ""]
     return "\n".join(out)
+
+
+def _cond_label(c):
+    """다이어그램 화살표에 붙일 조건 설명"""
+    parts = []
+    for k, v in c.items():
+        if k == "option":
+            parts.append(f"--with {v}")
+        elif k == "changed":
+            parts.append(f"{', '.join(v) if isinstance(v, list) else v} 변경")
+        elif k == "max_files":
+            parts.append(f"코드 파일 {v}개 이하")
+        elif k == "not":
+            parts.append(f"{_cond_label(v)} 아님")
+        elif k == "any":
+            parts.append(" 또는 ".join(_cond_label(x) for x in v))
+    return ", ".join(parts).replace('"', "#quot;")
 
 
 def fmt_cond(c):
