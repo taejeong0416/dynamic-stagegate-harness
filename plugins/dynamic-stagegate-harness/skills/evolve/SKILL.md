@@ -9,7 +9,7 @@ description: stagegate 하네스의 구조(종류, 상태, 경로, 검사)를 �
 
 ## 1. 진단
 
-1. `python -X utf8 .gate/gate.py diagnose`를 돌린다. 상태별 기록, hook이 막은 기록, `next`에서 막힌 이유, 저장소 변화가 나온다.
+1. `python -X utf8 .gate/gate.py diagnose`를 돌린다. 상태별 기록, 검토 호출 수와 비용, hook이 막은 기록, `next`에서 막힌 이유, 저장소 변화가 나온다.
 2. `.gate/PROFILE.md`(목적), `python -X utf8 .gate/gate.py describe`(지금 구조), `.gate/library/*.toml`(빌려 올 상태와 절)을 읽는다.
 3. 아래 신호를 찾는다. 신호마다 진단 자료의 수치나 파일을 근거로 적어 둔다.
 

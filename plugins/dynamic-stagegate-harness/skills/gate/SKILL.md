@@ -23,13 +23,14 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 - 사용자가 이번 턴에 멈추라고 하면 그 문장을 `hold P### --quote "<문장>"`으로 적는다. 스스로 멈추려고 쓰지 않는다.
 - 그만둘 때는 사용자와 정한 뒤 `abandon P### --why "..."`.
 - 테스트만 쓰는 상태(describe에 edit=tests로 나오는 TESTFIRST, REPRO, EVALSET 같은 상태)에서는 테스트 파일만 고치고 커밋한다. 구현 코드는 다음 상태로 넘긴 뒤에 쓴다.
+- 할 일이 코드 작성을 서브에이전트에 맡기라고 하면 Agent 도구에 할 일에 적힌 model과 effort를 준다. 프롬프트에는 계획 파일 경로, 통과시킬 명령, "변경 파일" 표에 없는 파일과 테스트 파일은 고치지 말라는 조건을 넣는다. 커밋과 `next`는 메인 세션이 돌아온 변경을 확인한 뒤 한다.
 - 먼저 쓴 테스트, 재현 테스트, 고정한 eval 케이스를 고쳐야 하면 고친 파일과 이유를 "테스트 수정" 표에 쓴다. 테스트를 통과시키려고 기대값을 구현에 맞춰 바꾸지 않는다.
 - 종류의 상한을 벗어났다고 막히면 계획의 파일을 줄여서 맞추지 않는다. 사용자에게 알리고 abandon한 뒤 맞는 종류로 `start --from P###`해서 잇는다.
 
 ## hook이 막았을 때
 
 - 막은 이유가 출력된다. 이유대로 상태를 진행하거나 커밋한다. `--no-verify`, `core.hooksPath` 변경, 상태 파일 직접 편집으로 피하지 않는다.
-- 상태 파일(.gate/state.json)은 gate 명령만 쓴다. 읽기와 git add, commit, diff, checkout, restore는 허용된다. 명령은 다른 명령과 `&&`로 잇지 말고 따로 부른다.
+- 상태 파일(.gate/state.json)은 gate 명령만 쓴다. git add, commit, checkout, restore는 허용된다. 파일이 커서 읽거나 diff로 열지 말고 `status`나 `diagnose`를 쓴다. 명령은 다른 명령과 `&&`로 잇지 말고 따로 부른다.
 - 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 사용자 승인을 받는다. config.toml, history, gatekit은 guard가 직접 편집을 막는다.
 - 하네스 파일(.gate/gatekit, config.toml, history, library, GATE.md, .githooks)을 바꾸는 커밋은 다른 파일과 섞지 않고 `harness:`로 시작한다.
 - SessionStart가 하네스 점검을 권하면 사용자에게 한 번 묻고, 하기로 하면 evolve skill을 쓴다.
