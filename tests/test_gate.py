@@ -14,12 +14,12 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "dynamic-stagegate-harness"
 PY = [sys.executable, "-X", "utf8"]
 ENV = {k: v for k, v in os.environ.items() if k != "GATE_REVIEW"} | {"PYTHONDONTWRITEBYTECODE": "1"}
-# 검토자 대신 쓰는 claude. 받은 지시문을 남기고 PASS를 돌려준다
+# 검토자 대신 쓰는 claude. 받은 지시문과 옵션을 남기고 PASS를 돌려준다
 FAKE_CLAUDE = '''import json, os, sys
 prompt = sys.stdin.buffer.read().decode("utf-8")
 with open(os.environ["GATE_FAKE_LOG"], "a", encoding="utf-8") as f:
-    f.write(json.dumps(prompt) + "\\n")
-print(json.dumps({"structured_output": {"pass": True, "missing": []}, "session_id": "s", "total_cost_usd": 0}))
+    f.write(json.dumps({"prompt": prompt, "args": sys.argv[1:]}) + "\\n")
+print(json.dumps({"structured_output": {"pass": True, "missing": []}, "session_id": "s", "total_cost_usd": 0.5}))
 '''
 
 
@@ -49,7 +49,7 @@ class Repo(unittest.TestCase):
         return run([*PY, ".gate/gate.py", *args], self.root, env=getattr(self, "env", ENV))
 
     def fake_reviewer(self):
-        """PATH 앞에 가짜 claude를 둔다. 받은 지시문은 self.prompts()로 읽는다"""
+        """PATH 앞에 가짜 claude를 둔다. 받은 지시문은 self.prompts(), 옵션은 self.calls()로 읽는다"""
         d = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, d, True)
         (d / "fake.py").write_text(FAKE_CLAUDE, encoding="utf-8")
@@ -61,8 +61,11 @@ class Repo(unittest.TestCase):
         self.log = d / "prompts.jsonl"
         self.env = ENV | {"PATH": str(d) + os.pathsep + ENV.get("PATH", ""), "GATE_FAKE_LOG": str(self.log)}
 
-    def prompts(self):
+    def calls(self):
         return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
+
+    def prompts(self):
+        return [x["prompt"] for x in self.calls()]
 
     def install(self, *args, target=None):
         return run([*PY, str(PLUGIN / "scripts" / "install.py"), *args, "--target", str(target or self.root)], self.root)
@@ -133,6 +136,14 @@ class LintTest(Repo):
         for preset in sorted(p.name for p in (PLUGIN / "presets").iterdir()):
             r = self.gate("lint", "--file", str(PLUGIN / "presets" / preset / "config.toml"))
             self.assertEqual(r.returncode, 0, preset + "\n" + r.stdout)
+
+    def test_검토자_추론_단계는_claude가_받는_값만_쓴다(self):
+        self.setup_harness()
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        self.write("bad.toml", text.replace('effort = "high"', 'effort = "highest"', 1))
+        r = self.gate("lint", "--file", "bad.toml")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("[review] effort는 low, medium, high, xhigh, max 중 하나다(지금 highest)", r.stdout)
 
     def test_다른_종류에_오류가_있어도_검사의_빠진_키를_잡는다(self):
         self.setup_harness()
@@ -378,6 +389,7 @@ class FeatureTest(Repo):
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
         self.assertIn("P001 f: RECORD", self.gate("next", "P001", "--review").stdout)
         self.assertIn(".git/gate-review/P001.diff", self.prompts()[-1])
+        self.assertNotIn("--model", self.calls()[-1]["args"])  # 코드 diff 검토는 기본 모델
         diff = (self.root / ".git" / "gate-review" / "P001.diff").read_text(encoding="utf-8")
         self.assertIn("+ok = 1", diff)
         self.assertIn("# 표에 있는데 바뀌지 않은 파일: 없음", diff)
@@ -389,6 +401,18 @@ class FeatureTest(Repo):
         self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
         self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+
+    def test_검토자는_상태별_모델과_추론_단계로_부르고_다시_검토한_비용을_쌓는다(self):
+        self.feature_to_test()
+        spec = next(c["args"] for c in self.calls() if "'요구사항', '수용 기준', '범위 밖' 절을 검토한다" in c["prompt"])
+        for flag in ("--model sonnet", "--effort high", "--strict-mcp-config", "--disable-slash-commands"):
+            self.assertIn(flag, " ".join(spec))
+        self.gate("back", "P001", "SPEC", "--why", "w")
+        self.edit("plans/P001.md", ("ok를 둔다.", "ok를 1로 둔다."))
+        self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
+        rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
+        self.assertEqual((rev["SPEC"]["calls"], rev["SPEC"]["spent"], rev["SPEC"]["model"]), (2, 1.0, "sonnet/high"))
+        self.assertIn("| feature | SPEC | 2 | 1.00 | sonnet/high |", self.gate("diagnose").stdout)
 
     def test_수용_기준마다_테스트_결과가_있어야_하고_막힌_이유가_진단에_남는다(self):
         self.feature_to_test()

@@ -351,26 +351,32 @@ def review_check(ctx, st):
         except ValueError:
             fields["diff"] = f.resolve().as_posix()
     result, meta = call_reviewer(st["review"].format(**fields), model)
+    calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
-                                         "missing": result["missing"], "at": now(), **meta}
+                                         "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
+                                         "spent": round(spent + (meta.get("cost") or 0), 6)}
     if dh:
         p["review"][state]["diff"] = dh
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 
 
 def call_reviewer(prompt, model=None):
-    """읽기 도구만 쓰는 별도 Claude 호출. ({pass, missing}, {session, cost}). 호출이 실패하면 FAIL"""
+    """읽기 도구만 쓰는 별도 Claude 호출. ({pass, missing}, {session, cost, model}). 호출이 실패하면 FAIL.
+    사용자 설정을 읽지 않으므로 추론 단계는 [review] effort로 넘기고, MCP 서버와 skill 목록은 싣지 않는다"""
     prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. "
                "파일을 고치지 않는다.")
+    effort = CFG["review"].get("effort")
     err = ""
     try:
         r = subprocess.run([shutil.which("claude") or "claude", "-p", *(["--model", model] if model else []),
+                            *(["--effort", effort] if effort else []), "--strict-mcp-config", "--disable-slash-commands",
                             "--setting-sources", "local", "--tools", CFG["review"].get("tools", "Read,Grep,Glob"),
                             "--no-session-persistence", "--output-format", "json", "--json-schema", REVIEW_SCHEMA],
                            cwd=ROOT, input=prompt, capture_output=True, text=True, encoding="utf-8",
                            timeout=CFG["review"].get("timeout", 600), env=os.environ | {"GATE_REVIEW": "1"})
         err = r.stderr.strip()[-200:]
         out = json.loads(r.stdout)
-        return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd")}
+        return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd"),
+                                          "model": f"{model or '기본'}/{effort or '기본'}"}
     except Exception as e:
         return {"pass": False, "missing": [f"검토 호출 실패: {e!r}" + (f" ({err})" if err else "")]}, {}

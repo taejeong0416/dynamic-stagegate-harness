@@ -28,6 +28,8 @@ REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("sect
             "test_edits": ("section",), "covers": ("section", "from")}
 # command의 use가 가리킬 수 있는 [project] 명령
 COMMAND_USE = ("test", "affected")
+# [review] effort에 쓸 수 있는 claude --effort 값
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # review 지시문에 쓸 수 있는 자리
 REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff"}
 
@@ -144,6 +146,8 @@ def lint(cfg):
     for s in cfg["project"]["stop_states"]:
         if s not in cfg["states"]:
             bad.append(f"stop_states의 {s}가 [states]에 없다")
+    if cfg["review"].get("effort") not in (None, *EFFORTS):
+        bad.append(f"[review] effort는 {', '.join(EFFORTS)} 중 하나다(지금 {cfg['review']['effort']})")
     for st in cfg["stages"]:
         for k in st.get("kinds", []):
             if k not in cfg["kinds"]:
@@ -291,7 +295,7 @@ def diagnose(flow):
     lines = [f"# 하네스 진단 ({now()})", "",
              f"- 지금 구조 버전: {CFG['version']}, 마지막 adopt: {hz.get('adopted', '설치')} {hz.get('at', '')}",
              f"- PROFILE.md: {'있음' if (GATE_DIR / 'PROFILE.md').exists() else '없음'}", ""]
-    stat, edges = {}, {}
+    stat, edges, spend = {}, {}, {}
 
     def slot(kind, state):
         return stat.setdefault((kind, state), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [],
@@ -317,6 +321,10 @@ def diagnose(flow):
         for s, rev in p.get("review", {}).items():
             if not rev.get("pass") and (p["kind"], s) in stat:
                 stat[(p["kind"], s)]["fail"] += rev.get("missing", [])[:2]
+            sp = spend.setdefault((p["kind"], s), [0, 0.0, set()])
+            sp[0] += rev.get("calls", 1)
+            sp[1] += rev.get("spent", rev.get("cost") or 0)
+            sp[2].add(rev.get("model") or "기록 없음")
         for s, ms in durs.items():
             if (p["kind"], s) in stat:
                 stat[(p["kind"], s)]["mins"] += ms
@@ -336,6 +344,13 @@ def diagnose(flow):
         ch = f"{statistics.median(d['chars']):.0f}" if d["chars"] else ""
         lines.append(f"| {k} | {s} | {d['visits']} | {d['back']} | {d['skip']} | {d['abandon']} | {med} | {ch} | "
                      + "; ".join(x[:60] for x in d["fail"][:3]) + " |")
+    lines += ["", "## 검토 호출", ""]
+    if spend:
+        lines += ["| 종류 | 상태 | 호출 수 | 비용 합계(USD) | 모델/추론 단계 |", "|---|---|---|---|---|"]
+        lines += [f"| {k} | {s} | {n} | {usd:.2f} | {', '.join(sorted(ms))} |"
+                  for (k, s), (n, usd, ms) in sorted(spend.items())]
+    else:
+        lines.append("없음")
     lines += ["", "## 되돌아간 경로", ""]
     if edges:
         lines += ["| 종류 | 떠난 상태 | 돌아간 상태 | 횟수 | 이유 |", "|---|---|---|---|---|"]
