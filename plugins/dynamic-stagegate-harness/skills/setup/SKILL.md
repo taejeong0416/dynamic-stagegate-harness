@@ -63,4 +63,4 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" --update --target "<프로젝트 루트>"
 ```
 
-출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .gate/gate.py lint`가 통과하는지 본다.
+출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .gate/gate.py lint`가 통과하는지 본다. 진행 중인 계획이 있으면 update가 경고를 출력한다. 그 계획은 구조 버전은 그대로 쓰지만 바뀐 엔진의 검사를 받으므로 사용자에게 알린다.

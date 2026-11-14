@@ -117,10 +117,10 @@ Python 3.11 이상과 git이 필요하다.
 
 1. `gate diagnose`가 상태별로 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유, 검토 호출 수와 비용, 되돌아간 경로별 횟수를 모으고, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화도 모은다.
 2. 에이전트가 그 수치를 근거로 `.gate/proposals/H###.md`에 제안서를 쓴다. 상태나 검사를 더하는 변경은 근거 하나로 충분하고, 빼거나 약하게 하는 변경은 진단 수치가 있어야 한다.
-3. `gate check-proposal`이 lint, 새 구조에서 빠지거나 풀리는 검사와 상태의 목록, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
+3. `gate check-proposal`이 lint, 새 구조에서 빠지거나 풀리는 검사와 상태와 설정([project], [review], [remote], [[stages]])의 목록, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
 4. 사용자가 바꾸는 것과 근거를 보고 승인하면 `gate adopt`가 적용한다. guard hook은 승인 문장이 이번 턴 사용자 입력에 있는지 확인한다.
 
-앞 구조는 `.gate/history/`에 남고, 진행 중인 계획은 시작할 때의 구조 버전을 끝까지 쓴다. 아래는 마이그레이션 단계와 작은 작업용 선택을 더한 뒤의 feature 경로 예시다.
+앞 구조는 `.gate/history/`에 남고, 진행 중인 계획은 시작할 때의 구조 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 code 패턴, 변경 파일 절 이름, max_visits, stop_states, 검토 모델과 추론 단계도 그 버전을 따르고, 엔진이 바뀐 진행 중 계획은 status와 SessionStart가 알린다. 아래는 마이그레이션 단계와 작은 작업용 선택을 더한 뒤의 feature 경로 예시다.
 
 ```mermaid
 flowchart LR
@@ -216,7 +216,7 @@ tests/test_gate.py                    임시 저장소에 설치해 명령과 ho
 
 설치한 프로젝트의 `.gate/`에는 config.toml(지금 구조), history/(앞 구조 버전), library/(빌려 쓸 구조), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
 
-엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 적용된다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다.
+엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 적용된다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다. 엔진의 앞 버전은 보관하지 않아서, 진행 중인 계획이 있으면 update가 경고한다.
 
 ## 한계
 

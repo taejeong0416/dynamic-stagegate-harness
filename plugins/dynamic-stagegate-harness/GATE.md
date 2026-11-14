@@ -25,9 +25,11 @@
 
 1. `diagnose`로 상태별 기록, 상태별 검토 호출 수와 비용, 되돌아간 경로별 횟수와 이유, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화를 본다. 상태별 기록은 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유다.
 2. `.gate/proposals/H###.md`에 제안서를 쓴다. "바꾸는 것" 표에 항목마다 근거를 쓰고, "진행 중인 계획" 절에 영향을 쓰고, "새 구조" 절에 새 config 전체를 toml 블록으로 넣는다. version은 지금보다 1 크다.
-3. `check-proposal H### --review`가 lint, 빼거나 푸는 변경 목록, 지난 계획 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한이 나오고, 검토자는 그 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
+3. `check-proposal H### --review`가 lint, 빼거나 푸는 변경 목록, 지난 계획 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
 4. 사용자에게 바꾸는 것과 근거를 보이고 승인을 받는다.
-5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다.
+5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 [project]의 계획 값(code, tests, files_section, max_visits, stop_states, test, affected, unreviewed), [review], [remote] exec_states도 계획 버전을 따른다. guard와 pre-commit처럼 여러 계획을 합치는 판단은 지금 구조나 진행 중인 계획의 버전 가운데 하나라도 코드로 보는 파일을 코드로 보고, 허용할 파일은 계획마다 자기 버전으로 뽑는다. 저장소에 하나뿐인 값(plans_dir, state_file, plan_prefix, harness, protected, tracked, pre_commit, status와 decisions 파일, 서버 주소)은 지금 구조를 따른다.
+
+계획을 시작할 때 엔진(.gate/gatekit) 내용의 해시를 남긴다. 엔진이 바뀐 진행 중 계획은 status에 "엔진 바뀜", SessionStart에 "[엔진 변경]"으로 나오고, setup update는 진행 중인 계획이 있으면 경고한다. 엔진의 앞 버전은 보관하지 않으므로, 진행 중인 계획을 끝낸 뒤 갱신하는 편이 안전하다.
 
 `lint [--file <toml>]`은 구조를 따로 검사한다. 모든 종류의 상태가 정의돼 있는지, 검사가 가리키는 절과 항목이 계획 틀에 있는지, 조건 키와 선택이 맞는지, 보호 파일 목록을 줄이지 않았는지 본다.
 
