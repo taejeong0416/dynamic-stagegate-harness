@@ -183,6 +183,19 @@ def command(ctx, spec):
 
 
 @check
+def code_unchanged(ctx, spec):
+    """이 상태에 들어온 뒤 계획의 코드 파일에 커밋도, 커밋하지 않은 변경도 없다. 결과가 앞 상태에서 검사받은 코드에서
+    나왔는지 본다. 바뀌었으면 코드 상태로 돌아가 다시 지난 뒤 다시 실행한다"""
+    files = plan_files(ctx["s"])
+    if not files:
+        return []
+    since = ctx["p"]["entered"][ctx["state"]]["commit"]
+    moved = sorted(changed_since(since, *files) | {f for _, f in dirty_code() if f in files})
+    return [f"{ctx['state']}에 들어온 뒤 계획의 코드 파일 {', '.join(moved)}가 바뀌었다. 결과가 앞에서 검사받은 코드에서 "
+            "나왔다고 볼 수 없어, 코드 상태로 back해 다시 지난 뒤 다시 실행한다"] if moved else []
+
+
+@check
 def run_record(ctx, spec):
     """gate run으로 예상 종료 시각과 근거를 적었다"""
     return [] if ctx["p"].get("run") else ["gate run 기록이 없다"]
@@ -270,8 +283,11 @@ def unchanged(ctx, spec):
         keys = spec.get("sections") or ([spec["section"]] if spec.get("section") else
                                         ctx["cfg"]["states"][st].get("sections", []))
     cur = snapshot(ctx["s"])
-    return [f"{st}를 넘긴 뒤 '{k}'이 바뀌었다. 되돌리거나 back으로 {st}에 돌아가 다시 넘긴다"
-            for k in keys if snap.get(k) != cur.get(k)]
+    if st in p.get("frozen", []):  # gate run 뒤에는 결과가 보이므로 다시 넘겨도 기준을 바꾸지 않는다
+        how = f"gate run 뒤라 {st}를 다시 넘겨도 기준이 그대로다. 되돌리고, 새 기준이 필요하면 start --from {ctx['pid']}로 잇는다"
+    else:
+        how = f"되돌리거나 back으로 {st}에 돌아가 다시 넘긴다"
+    return [f"{st}를 넘긴 뒤 '{k}'이 바뀌었다. {how}" for k in keys if snap.get(k) != cur.get(k)]
 
 
 @check
@@ -316,47 +332,98 @@ REVIEW_SCHEMA = json.dumps({"type": "object", "properties": {
     "required": ["pass", "missing"]})
 
 
-def plan_diff(ctx):
-    """계획을 시작한 뒤의 코드 diff. 머리에 '변경 파일' 표와 다른 파일을 적는다"""
+def plan_diff(ctx, base=None):
+    """계획의 코드 diff. base가 없으면 계획을 시작한 뒤, 있으면 base 뒤의 변경만 담는다.
+    머리에 범위와, 계획을 시작한 뒤 '변경 파일' 표와 다르게 바뀐 파일을 적는다"""
     p, files_section = ctx["p"], ctx["cfg"]["project"]["files_section"]
     start = p["entered"]["_start"]["commit"]
     listed, changed = plan_files(ctx["s"]), changed_since(start)
     code = sorted(f for f in changed if is_code(f))
     target = listed or code
-    head = [f"# {ctx['pid']} 코드 diff ({start}..HEAD, 계획을 시작한 뒤의 커밋, '{files_section}' 표의 파일)",
+    scope = f"{base}..HEAD, 앞 검토를 통과한 뒤의 변경만" if base else f"{start}..HEAD, 계획을 시작한 뒤의 커밋"
+    head = [f"# {ctx['pid']} 코드 diff ({scope}, '{files_section}' 표의 파일)",
             f"# 표에 있는데 바뀌지 않은 파일: {', '.join(f for f in listed if f not in changed) or '없음'}",
             f"# 표에 없는데 바뀐 코드 파일(다른 계획의 변경일 수 있다): {', '.join(f for f in code if f not in listed) or '없음'}",
             ""]
-    return "\n".join(head) + (git("diff", f"{start}..HEAD", "--", *target) if target else "")
+    body_ = git("diff", f"{base or start}..HEAD", "--", *target) if target else ""
+    return "\n".join(head) + body_, body_
+
+
+CITE_DEFAULT = r"\b[A-Z]+\d{3}\b"  # 계획 번호(P001)와 같은 꼴의 참조
+
+
+def context_file(ctx, st):
+    """검토자가 먼저 읽을 발췌. 상태의 context에 적은 파일마다, context_full자 이하면 전문, 넘으면 마크다운 제목과
+    제목마다 첫 줄, 계획 파일이 인용한 참조([review] cite 패턴과 계획 번호)가 든 줄, csv면 머리 행을 담는다"""
+    text = ctx["text"]
+    pats = CFG["review"].get("cite", [CITE_DEFAULT])
+    cited = {ctx["pid"]} | {x for pat in pats for x in re.findall(pat, text)}
+    out = [f"# {ctx['pid']} {ctx['state']} 검토 발췌", "",
+           f"계획 파일이 인용한 참조: {', '.join(sorted(cited))}", ""]
+    for rel in st.get("context", []):
+        f = ROOT / rel
+        if not f.exists():
+            out += [f"## {rel}", "", "(없음)", ""]
+            continue
+        lines = f.read_text(encoding="utf-8").splitlines()
+        if sum(len(l) + 1 for l in lines) <= CFG["review"]["context_full"]:
+            out += [f"## {rel} (전문)", ""] + lines + [""]
+            continue
+        keep, after_head = [], False
+        for i, line in enumerate(lines):
+            hit = any(re.search(rf"(?<![\w]){re.escape(c)}(?![\w])", line) for c in cited)
+            if (rel.endswith(".csv") and i == 0) or line.startswith("#") or hit:
+                keep.append(line[:400])
+                after_head = line.startswith("#")
+            elif after_head and line.strip():
+                keep.append(line[:200])
+                after_head = False
+        out += [f"## {rel} (발췌: 제목과 제목마다 첫 줄, 인용한 참조가 든 줄)", ""] + keep + [""]
+    f = git_path(f"gate-review/{ctx['pid']}-{ctx['state']}-context.md")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("\n".join(out), encoding="utf-8")
+    return rel_path(f)
+
+
+def rel_path(f):
+    try:
+        return f.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return f.resolve().as_posix()
 
 
 def review_check(ctx, st):
-    """검토자 호출. review에 {diff}가 있으면 계획을 시작한 뒤의 코드 diff를 파일로 주고, diff가 바뀌어도 다시 검토한다"""
+    """검토자 호출. review에 {diff}가 있으면 코드 diff를 파일로 준다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐
+    코드만 다시 본다. {context}가 있으면 상태의 context 파일에서 뽑은 발췌를 준다"""
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
-    diff = plan_diff(ctx) if "{diff}" in st["review"] else ""
-    dh = hashlib.sha256(diff.encode("utf-8")).hexdigest()[:16] if diff else None
     rev = p.get("review", {}).get(state)
-    if rev and rev["hash"] == plan_hash(text, ctx["cfg"]) and rev["pass"] and rev.get("diff") == dh:
-        return []
+    same = bool(rev) and rev["hash"] == plan_hash(text, ctx["cfg"])
+    uses_diff = "{diff}" in st["review"]
+    base = rev.get("upto") if same and uses_diff else None
+    if same and rev["pass"]:
+        if not uses_diff:
+            return []
+        if base and not plan_diff(ctx, base)[1].strip():
+            return []  # 통과한 뒤 코드가 바뀌지 않았다
     model = st.get("review_model") or CFG["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
     fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state}
-    if diff:
+    if uses_diff:
+        diff = plan_diff(ctx, base)[0]
         f = git_path(f"gate-review/{ctx['pid']}.diff")
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(diff, encoding="utf-8")
-        try:
-            fields["diff"] = f.resolve().relative_to(ROOT).as_posix()
-        except ValueError:
-            fields["diff"] = f.resolve().as_posix()
+        fields["diff"] = rel_path(f)
+    if "{context}" in st["review"]:
+        fields["context"] = context_file(ctx, st)
     result, meta = call_reviewer(st["review"].format(**fields), model)
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
                                          "spent": round(spent + (meta.get("cost") or 0), 6)}
-    if dh:
-        p["review"][state]["diff"] = dh
+    if uses_diff:  # 다음 검토의 diff 시작점. 실패하면 앞에서 통과한 시점을 그대로 둔다
+        p["review"][state]["upto"] = git("rev-parse", "--short", "HEAD").strip() if result["pass"] else base
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 
 

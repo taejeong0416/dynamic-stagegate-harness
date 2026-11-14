@@ -4,7 +4,8 @@ guard(PreToolUse): 상태에 맞지 않는 행동을 막는다. 내부 예외가
 stop(Stop): 이 세션이 고친 코드, 하네스, 상태 파일의 미커밋 변경과, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있을 때
   막는다. 이번 턴에 고친 문서의 미커밋 변경은 알리기만 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는
   막지 않는다. 5번 연속 막으면 통과시킨다.
-session(SessionStart): 진행 중인 계획과 할 일 전체를 넣는다. prompt(UserPromptSubmit): 계획마다 한 줄만 넣는다.
+session(SessionStart): 진행 중인 계획과 할 일 전체, status_file 절의 항목 머리를 6,000자 안으로 넣는다.
+  prompt(UserPromptSubmit): 계획마다 한 줄만 넣는다.
   주입 hook은 예외가 나도 통과한다.
 """
 import json
@@ -15,14 +16,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 STOP_CAP = 5  # 근거 없이 정한 값. Claude Code는 도구 호출 없이 8번 막히면 강제로 끝낸다
+# SessionStart 주입 상한. hook 출력이 10,000자를 넘으면 Claude Code가 파일로 빼고 앞 2KB만 넣는다. 여유를 둔 값이다
+CONTEXT_CAP = 6000
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 ARG = r"(?:\"[^\"\n]*\"|'[^'\n]*'|\S+)"
-CLI_CMD = re.compile(r"^\s*(python3?|py)(\s+-X\s+utf8)?\s+\.gate/gate\.py(\s+[^;&|<>`$\n]*)?$")
-CD = re.compile(r"^\s*cd\s+" + ARG + r"\s*(?:&&|;)\s*")  # 앞에 붙는 폴더 이동 하나
-READ_SEG = re.compile(r"^\s*(cat|type|head|tail|ls|dir|wc|grep|rg|findstr|Get-Content|Get-ChildItem"
-                      r"|Select-String|Measure-Object|Select-Object"
-                      r"|git(?:\s+-C\s+" + ARG + r")?\s+(add|commit|diff|log|show|status|checkout|restore|blame|grep))\b"
-                      r"[^;&|<>`$\n]*$")
+CLI_SEG = re.compile(r"^\s*(python3?|py)(\s+-X\s+utf8)?\s+\.gate/gate\.py\b")
+# 인자를 프로그램으로 읽지 않는 명령만 둔다. awk, sed, find, xargs, sort -o는 파일을 쓰거나 명령을 돌릴 수 있어 뺀다
+READ_SEG = re.compile(r"^\s*(cd|cat|type|head|tail|ls|dir|wc|grep|rg|findstr|cut|echo|du|stat|nl|Get-Content"
+                      r"|Get-ChildItem|Select-String|Measure-Object|Select-Object"
+                      r"|git(?:\s+-C\s+" + ARG + r")?\s+(add|commit|diff|log|show|status|checkout|restore|blame|grep"
+                      r"|ls-files|rev-parse|branch))\b")
+DROP_REDIR = re.compile(r"\s(?:2>\s*/dev/null|2>&1|2>\s*\$null)(?=[\s;&|]|$)")  # 오류 출력을 버리는 리다이렉트만 허용
 STATE_TOUCH = re.compile(r"\.gate/state\.json|\.gate/gate\.py|import\s+gatekit|from\s+gatekit|gate\.lock")
 HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b"
                       r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
@@ -33,22 +37,55 @@ SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out
                          r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
 
 
+def split_cmd(cmd):
+    """따옴표 밖의 &&, ||, ;, |로 나눈 조각. 따옴표 밖 리다이렉트(오류 출력 버리기 제외), 명령 치환, 배경 실행,
+    줄바꿈이나 큰따옴표 안 명령 치환이 있으면 None"""
+    cmd = DROP_REDIR.sub(" ", cmd)
+    segs, cur, q, i = [], "", None, 0
+    while i < len(cmd):
+        c, two = cmd[i], cmd[i:i + 2]
+        if q:
+            if c == q:
+                q = None
+            elif q == '"' and (c == "`" or two == "$("):
+                return None
+            cur, i = cur + c, i + 1
+        elif c in "\"'":
+            q, cur, i = c, cur + c, i + 1
+        elif two in ("&&", "||"):
+            segs, cur, i = segs + [cur], "", i + 2
+        elif c in ";|":
+            segs, cur, i = segs + [cur], "", i + 1
+        elif c in "<>`&\n" or two == "$(":
+            return None
+        else:
+            cur, i = cur + c, i + 1
+    return None if q else [s for s in segs + [cur] if s.strip()]
+
+
 def is_read(cmd):
-    """읽기 명령만 파이프로 이은 명령인가. 리다이렉트, 명령 잇기, 명령 치환은 읽기로 보지 않는다"""
-    cmd = CD.sub("", cmd, count=1)
-    if re.search(r"\|\||[;&<>`\n]|\$\(", cmd):
-        return False
-    return all(READ_SEG.match(seg) for seg in cmd.split("|"))
+    """읽기 명령만 이은 명령인가"""
+    segs = split_cmd(cmd)
+    return bool(segs) and all(READ_SEG.match(s) for s in segs)
+
+
+def state_safe(cmd):
+    """읽기 명령과 gate 명령만 이은 명령인가. 상태 파일을 쓰는 길은 gate 명령뿐이다"""
+    segs = split_cmd(cmd)
+    return bool(segs) and all(READ_SEG.match(s) or CLI_SEG.match(s) for s in segs)
 
 
 def emit(obj):
     print(json.dumps(obj, ensure_ascii=False))
 
 
+CMD = ""  # 막은 명령(점검 자료)
+
+
 def deny(reason):
-    try:  # 하네스 점검 자료
+    try:  # 하네스 점검 자료. 오탐을 가려낼 수 있게 명령 앞부분도 남긴다
         from .core import log_event
-        log_event("guard", reason)
+        log_event("guard", reason, **({"cmd": CMD[:200]} if CMD else {}))
     except Exception:
         pass
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -65,9 +102,25 @@ def rel(path, root):
 
 # guard
 
+def code_gate(path, flow):
+    """코드 파일 path를 고칠 수 없는 이유나 None. 코드 상태인 계획의 files_section에 적은 파일만 열린다"""
+    from .core import P, code_open, open_files, tests_only
+    if not code_open(flow):
+        return (f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .gate/gate.py status로 상태를 보고, "
+                "계획을 시작하거나 next로 코드 상태까지 진행한다.")
+    if tests_only(flow, path):
+        return tests_only(flow, path)
+    opened = open_files(flow)
+    if path not in opened:
+        return (f"{path}는 코드를 고치는 상태인 계획의 '{P['files_section']}' 절에 없어 수정을 막았다. 고칠 계획의 표에 먼저 "
+                f"적는다(지금 열린 파일: {', '.join(sorted(opened)) or '없음'}).")
+    return None
+
+
 def guard(inp):
-    from .core import (ROOT, STATE, code_open, dirty_code, is_code, is_protected, load, remote_on, run_open, tests_only,
-                       LAUNCH, UPLOAD)
+    global CMD
+    from .core import (ROOT, STATE, dirty_code, exec_open, is_code, is_protected, load, remote_exec_paths, remote_on,
+                       run_open, LAUNCH, UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
     if tool in EDIT_TOOLS:
@@ -80,20 +133,20 @@ def guard(inp):
         if is_protected(path):
             deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .gate/proposals/H###.md에 제안서를 쓰고 "
                  "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(evolve skill).")
-        if is_code(path) and not code_open(load()):
-            deny(f"코드를 고치는 상태인 계획이 없어 {path} 수정을 막았다. python -X utf8 .gate/gate.py status로 상태를 보고, "
-                 "계획을 시작하거나 next로 코드 상태까지 진행한다.")
-        if is_code(path) and tests_only(load(), path):
-            deny(tests_only(load(), path))
+        if is_code(path):
+            why = code_gate(path, load())
+            if why:
+                deny(why)
         return
     if tool not in ("Bash", "PowerShell"):
         return
-    cmd = ti.get("command", "").replace("\\", "/")
+    cmd = CMD = ti.get("command", "").replace("\\", "/")
     if HOOK_OFF.search(MSG_ARG.sub(r"\1", cmd)):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
-    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not (CLI_CMD.match(cmd) or is_read(cmd)):
-        deny("상태는 python -X utf8 .gate/gate.py 명령 하나로만 바꾼다. 다른 명령과 잇거나 Python으로 직접 다루지 않는다.")
-    if CLI_CMD.match(cmd) and re.search(r"\.gate/gate\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만
+    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not state_safe(cmd):
+        deny("상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다. 읽기 명령(cat, grep, git log 등)과 이을 수는 있지만 "
+             "Python 스크립트, 리다이렉트, 다른 쓰기 명령으로 다루지 않는다.")
+    if re.search(r"\.gate/gate\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만(이은 명령 안도 본다)
         m = ADOPT.search(cmd)
         quote = " ".join((m.group(2) or m.group(3) or "").split()) if m else ""
         prompt = read_transcript(inp["transcript_path"], LAUNCH)["prompt"] if inp.get("transcript_path") else ""
@@ -104,11 +157,12 @@ def guard(inp):
     for m in SHELL_WRITE.finditer(cmd):
         if is_protected(m.group(2)):
             deny(f"{m.group(2)}는 하네스 구조 파일이라 셸로 쓰지 않는다. 제안서와 adopt로 바꾼다.")
-        if is_code(m.group(2)) and not code_open(flow):
-            deny(f"코드를 고치는 상태인 계획이 없어 셸로 {m.group(2)}를 쓰는 것을 막았다.")
-        if is_code(m.group(2)) and tests_only(flow, m.group(2)):
-            deny(tests_only(flow, m.group(2)))
-    if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd)):
+        if is_code(m.group(2)):
+            why = code_gate(m.group(2), flow)
+            if why:
+                deny(f"셸로 {m.group(2)}를 쓰는 것을 막았다. " + why)
+    execs = remote_exec_paths(cmd) if remote_on() else []
+    if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd) or execs):
         d = dirty_code()
         if d:
             deny("커밋하지 않은 코드가 있어 서버 실행과 업로드를 막았다. 커밋한 뒤 다시 실행한다: "
@@ -116,6 +170,9 @@ def guard(inp):
         if LAUNCH.search(cmd) and not run_open(flow):
             deny("실행 상태이고 gate run 기록(예상 종료 시각과 근거)이 있는 계획이 없어 서버 실행을 막았다. "
                  "python -X utf8 .gate/gate.py run P### --eta HH:MM --basis \"...\"를 먼저 한다.")
+        if execs and not exec_open(flow):
+            deny(f"ssh로 저장소 코드({', '.join(execs)})를 돌리려면 gate run 기록이 있는 실행 상태 계획이나 [remote] "
+                 "exec_states 상태의 계획이 있어야 한다. nvidia-smi, tail, ps 같은 서버 확인 명령은 막지 않는다.")
 
 
 def recoverable(inp, root):
@@ -131,7 +188,8 @@ def recoverable(inp, root):
 
 # stop
 
-def read_transcript(path, launch):
+def read_transcript(path, launch, bg_exec=None):
+    """bg_exec(cmd)가 참인 run_in_background 명령도 서버 실행으로 센다(그 자리에서 돌리는 ssh)"""
     from .core import ROOT
     rows = []
     with open(path, encoding="utf-8") as f:
@@ -182,9 +240,10 @@ def read_transcript(path, launch):
         if d["type"] != "assistant" or isinstance(c, str):
             continue
         for x in c:
-            if x.get("type") == "tool_use" and x.get("name") in ("Bash", "PowerShell") \
-                    and launch.search(x["input"].get("command", "").replace("\\", "/")):
-                launched = True
+            if x.get("type") == "tool_use" and x.get("name") in ("Bash", "PowerShell"):
+                cmd = x["input"].get("command", "").replace("\\", "/")
+                if launch.search(cmd) or (bg_exec and x["input"].get("run_in_background") and bg_exec(cmd)):
+                    launched = True
             elif x.get("type") == "text":
                 text.append(x["text"])
     prompt = " ".join(text_of(rows[start]).split()) if rows else ""
@@ -203,9 +262,10 @@ def eta_passed(run):
 
 
 def stop_problems(inp):
-    from .core import P, ROOT, STATE, dirty, is_code, is_harness, load, remote_on, sections, state_def, LAUNCH
+    from .core import (P, ROOT, STATE, dirty, is_code, is_harness, load, remote_exec_paths, remote_on, sections, state_def,
+                       LAUNCH)
     from .checks import results
-    t = read_transcript(inp["transcript_path"], LAUNCH)
+    t = read_transcript(inp["transcript_path"], LAUNCH, remote_exec_paths)
     flow = load()
     state_rel = STATE.relative_to(ROOT).as_posix()
     edited, edited_turn = set(t["edited"]), set(t["edited_turn"])
@@ -296,15 +356,35 @@ def context(event):
              status_text(flow)]
     if P["status_file"] and (ROOT / P["status_file"]).exists():
         text = (ROOT / P["status_file"]).read_text(encoding="utf-8")
+        parts.append(f"아래 {P['status_file']} 절은 항목 머리만 줄인 것이다. 계획 작업이면 전문을 먼저 읽는다.")
         for title in P["status_sections"]:
             m = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
-            parts.append(f"## {title}\n" + (m.group(1).strip() if m else "(없음)"))
+            parts.append(f"## {title}(머리)\n" + "\n".join(heads(m.group(1).strip() if m else "")))
     from .evolve import review_due
     why = review_due(flow)
     if why:
         parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 evolve skill로 "
                      "진단하고 구조 변경 제안서를 쓴다. 지금 요청이 급하면 그 일을 먼저 한다.")
-    emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n\n".join(parts)}})
+    ctx = "\n\n".join(parts)
+    if len(ctx) > CONTEXT_CAP:
+        ctx = ctx[:CONTEXT_CAP] + f"\n…(잘림. 전문은 {P['status_file'] or '상태 파일'}과 python -X utf8 .gate/gate.py status)"
+    emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}})
+
+
+def cut(s, n=160):
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def heads(body_):
+    """번호 항목, bullet, 표 행의 머리. 없으면 첫 문단의 머리"""
+    items = re.findall(r"^((?:\d+\.|[-*]) .*)", body_, re.M)
+    rows = [l for l in body_.splitlines() if l.startswith("|") and not re.match(r"^\|[\s:|-]+\|$", l)][1:]
+    if items:
+        return [cut(x) for x in items]
+    if rows:
+        return ["- " + cut(r.strip("| ").split("|")[0]) for r in rows]
+    return [cut(body_.split("\n\n")[0], 400)] if body_ else ["(없음)"]
 
 
 def main(event, root):

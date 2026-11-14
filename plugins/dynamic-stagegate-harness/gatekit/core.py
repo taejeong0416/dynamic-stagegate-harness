@@ -56,7 +56,8 @@ def parse_config(text):
     raw = tomllib.loads(text)
     return {"version": raw.get("version", 1), "project": DEFAULTS | raw.get("project", {}),
             "kinds": raw.get("kinds", {}), "states": raw.get("states", {}), "sections": raw.get("sections", {}),
-            "stages": raw.get("stages", []), "remote": raw.get("remote", {}), "review": raw.get("review", {})}
+            "stages": raw.get("stages", []), "remote": raw.get("remote", {}),
+            "review": {"context_full": 6000} | raw.get("review", {})}
 
 
 CFG = parse_config((GATE_DIR / "config.toml").read_text(encoding="utf-8"))
@@ -257,8 +258,23 @@ def tests_only(flow, path):
             "구현 코드는 next로 다음 상태에 간 뒤에 쓴다.")
 
 
+def open_files(flow):
+    """코드 편집이 열린 파일: 코드 상태인 계획의 files_section에 적은 파일(pre-commit과 같은 기준)"""
+    out = set()
+    for p in flow["plans"].values():
+        if p["state"] not in CLOSED and state_def(p).get("code"):
+            out |= set(plan_files(sections(plan_text(p))))
+    return out
+
+
 def run_open(flow):
     return any(state_def(p).get("run") and p.get("run") for p in flow["plans"].values() if p["state"] not in CLOSED)
+
+
+def exec_open(flow):
+    """ssh로 저장소 코드를 그 자리에서 돌려도 되는가: gate run 기록이 있는 실행 상태나 [remote] exec_states의 상태"""
+    states = CFG["remote"].get("exec_states", [])
+    return run_open(flow) or any(p["state"] in states for p in flow["plans"].values() if p["state"] not in CLOSED)
 
 
 # 계획 파일
@@ -452,6 +468,22 @@ CMD_AT = r"(?:^|[;&|(]\s*|\b(?:timeout\s+\S+|nohup|setsid)\s+)"
 LAUNCH = re.compile(CMD_AT + r"ssh\b(?:[^\n\"']*?\s-[a-zA-Z]*f[a-zA-Z]*\b|[^\n]*?(?:\bnohup\b|\bsetsid\b"
                     r"|\btmux\s+(?:-\S+\s+)*(?:new|new-session|send-keys|send)\b|\bscreen\s+-\S*d))", re.M)
 UPLOAD = re.compile(CMD_AT + r"(scp|rsync)\b", re.M)
+# 띄우지 않고 그 자리에서 서버의 코드를 돌리는 ssh. 해석기 이름은 명령 자리만 본다(chain_lib.sh의 sh를 빼기 위해서다).
+# 해석기 옵션(-X utf8, -u) 뒤의 파일이나 -m 모듈을 잡고, 저장소 코드인지는 remote_exec_paths가 code 패턴으로 가린다
+REMOTE_EXEC = re.compile(r"(?<![\w./-])(?:python3?|py|torchrun|node|bash|sh|Rscript)(?:\s+-(?!m\s)\S*(?:\s+utf8)?)*\s+"
+                         r"(?:-m\s+([\w.]+)|(?:\./)?([\w./-]+\.\w+))")
+SSH_AT = re.compile(CMD_AT + r"ssh\b[^\n]*", re.M)
+
+
+def remote_exec_paths(cmd):
+    """명령 자리의 ssh가 돌리는 저장소 코드 파일. -m 모듈은 a/b.py로 바꿔 code 패턴에 맞춘다"""
+    out = []
+    for m in SSH_AT.finditer(cmd):
+        for mod, path in REMOTE_EXEC.findall(m.group(0)):
+            f = mod.replace(".", "/") + ".py" if mod else path
+            if is_code(f):
+                out.append(f)
+    return out
 
 
 def remote_on():

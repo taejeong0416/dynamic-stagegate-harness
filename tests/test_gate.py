@@ -335,6 +335,57 @@ class FlowTest(Repo):
         self.edit("plans/P001.md", ("gate_no_such_cmd_xyz --run", f'"{sys.executable}" -c "raise SystemExit(5)"'))
         self.assertIn("테스트를 돌리지 못한 것으로 보인다(종료 코드 5)", self.gate("next", "P001").stdout)
 
+    def runx(self):
+        """chore를 IMPLEMENT, RUNX(실행 상태), RECORD로 바꾸고 RUNX에서 코드와 IMPLEMENT의 변경 파일 절이 그대로인지 본다"""
+        self.edit(".gate/config.toml",
+                  ('[kinds.chore]\nstates = ["IMPLEMENT", "RECORD"]',
+                   '[kinds.chore]\nstates = ["IMPLEMENT", "RUNX", "RECORD"]\nback = {RUNX = ["IMPLEMENT"]}'),
+                  ("[states.RECORD]", '[states.RUNX]\nrun = true\nchecks = [\n  {check = "code_unchanged"},\n'
+                   '  {check = "unchanged", state = "IMPLEMENT", sections = ["변경 파일"]},\n]\n\n[states.RECORD]'))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: runx").returncode, 0)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.write("src/a.py", "a = 2\n")
+        self.fill_chore("P001")
+        self.git("add", "src/a.py", "plans")
+        self.assertEqual(self.git("commit", "-qm", "feat: a").returncode, 0)
+        self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
+
+    def test_실행_상태에_들어온_뒤_계획의_코드가_바뀌면_막는다(self):
+        self.runx()
+        self.write("src/a.py", "a = 3\n")
+        r = self.gate("next", "P001")
+        self.assertIn("RUNX에 들어온 뒤 계획의 코드 파일 src/a.py가 바뀌었다", r.stdout)
+        self.write("src/a.py", "a = 2\n")
+        self.assertIn("P001 t: RECORD", self.gate("next", "P001").stdout)
+
+    def test_gate_run_뒤에는_back으로_다시_넘겨도_unchanged_기준이_그대로다(self):
+        self.runx()
+        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "실행 전").returncode, 0)
+        self.edit("plans/P001.md", ("| src/a.py | 새 파일 |", "| src/a.py | 새 파일, 설명 고침 |"))
+        self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
+        self.assertEqual(self.gate("run", "P001", "--eta", "23:59", "--basis", "b").returncode, 0)
+        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "결과를 봄").returncode, 0)
+        self.edit("plans/P001.md", ("| src/a.py | 새 파일, 설명 고침 |", "| src/a.py | 결과 뒤 고침 |"))
+        self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
+        r = self.gate("next", "P001")
+        self.assertIn("gate run 뒤라 IMPLEMENT를 다시 넘겨도 기준이 그대로다", r.stdout)
+
+    def test_SessionStart는_status_절의_항목_머리만_상한_안으로_넣는다(self):
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        text = text.replace("[project]\n", '[project]\nstatus_file = "docs/status.md"\nstatus_sections = ["다음에 볼 것"]\n', 1)
+        self.write(".gate/config.toml", text)
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: status").returncode, 0)
+        items = "\n".join(f"{i}. 항목 {i} " + "긴 설명 " * 200 for i in range(1, 60))
+        self.write("docs/status.md", "# 상태\n\n## 다음에 볼 것\n\n" + items + "\n")
+        r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "session"], self.root, "{}",
+                ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(ctx), 6200)
+        self.assertIn("## 다음에 볼 것(머리)\n1. 항목 1 긴 설명", ctx)
+        self.assertIn("…", ctx)
+
     def test_chore는_affected_명령에_계획의_파일을_넣어_돌린다(self):
         self.edit(".gate/config.toml", ('affected = ""', 'affected = "git grep -q zzz -- {files}"'))
         self.git("add", ".gate/config.toml")
@@ -401,6 +452,28 @@ class FeatureTest(Repo):
         self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
         self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+        self.assertIn("P001 f: RECORD", self.gate("next", "P001", "--review").stdout)
+        diff = (self.root / ".git" / "gate-review" / "P001.diff").read_text(encoding="utf-8")
+        self.assertIn("앞 검토를 통과한 뒤의 변경만", diff)  # 다시 검토할 때는 통과한 뒤 바뀐 코드만 준다
+        self.assertIn("+ok = 2", diff)
+        self.assertNotIn("+ok = 1", diff)
+
+    def test_검토자는_context_파일의_발췌를_받는다(self):
+        self.edit(".gate/config.toml",
+                  ("[states.SPEC]\n", '[states.SPEC]\ncontext = ["docs/notes.md", "docs/small.md"]\n'),
+                  ("{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다.",
+                   "{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다. 먼저 발췌 {context}를 읽는다."))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: context").returncode, 0)
+        filler = "\n".join(f"채움 줄 {i} " + "x" * 80 for i in range(120))
+        self.write("docs/notes.md", f"# 노트\n\n## 결정 A\n\n결정 A의 첫 줄이다.\n{filler}\n\n## 결정 B\n\n- P001이 쓰는 줄\n{filler}\n")
+        self.write("docs/small.md", "작은 파일 전문\n")
+        self.feature_to_test()
+        ctx = (self.root / ".git" / "gate-review" / "P001-SPEC-context.md").read_text(encoding="utf-8")
+        self.assertIn(".git/gate-review/P001-SPEC-context.md", next(p for p in self.prompts() if "발췌" in p))
+        for want in ("## 결정 A", "결정 A의 첫 줄이다.", "- P001이 쓰는 줄", "## docs/small.md (전문)", "작은 파일 전문"):
+            self.assertIn(want, ctx)
+        self.assertNotIn("채움 줄 5 ", ctx)
 
     def test_검토자는_상태별_모델과_추론_단계로_부르고_다시_검토한_비용을_쌓는다(self):
         self.feature_to_test()
@@ -470,17 +543,21 @@ class GuardTest(Repo):
         self.assertIn("셸로 src/b.py를 쓰는 것을 막았다", self.guard("Bash", command="echo 1 > src/b.py"))
         self.assertIsNone(self.guard("Write", file_path=self.path("docs/a.md")))
 
-    def test_코드_상태인_계획이_있으면_코드_편집이_열린다(self):
+    def test_코드_상태인_계획의_변경_파일_표에_적은_파일만_열린다(self):
         self.gate("start", "--kind", "chore", "--title", "t")
+        self.assertIn("'변경 파일' 절에 없어", self.guard("Write", file_path=self.path("src/a.py")))
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 새 파일 |"))
         self.assertIsNone(self.guard("Write", file_path=self.path("src/a.py")))
+        self.assertIn("지금 열린 파일: src/a.py", self.guard("Write", file_path=self.path("src/other.py")))
+        self.assertIn("'변경 파일' 절에 없어", self.guard("Bash", command="echo 1 > src/other.py"))
 
     def test_테스트만_쓰는_상태에서는_테스트_파일만_고치고_커밋한다(self):
         self.gate("start", "--kind", "bugfix", "--title", "b")
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|",
+                                    "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 고침 |\n| tests/test_a.py | 재현 |"))
         self.assertIn("테스트만 쓰는 상태(P001 REPRO)", self.guard("Write", file_path=self.path("src/a.py")))
         self.assertIn("테스트만 쓰는 상태(P001 REPRO)", self.guard("Bash", command="echo 1 > src/b.py"))
         self.assertIsNone(self.guard("Write", file_path=self.path("tests/test_a.py")))
-        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|",
-                                    "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 고침 |\n| tests/test_a.py | 재현 |"))
         self.write("src/a.py", "a = 2\n")
         self.write("tests/test_a.py", "x\n")
         self.git("add", "src", "tests", "plans")
@@ -499,8 +576,47 @@ class GuardTest(Repo):
         self.assertIsNone(self.guard("Bash", command="python -X utf8 .gate/gate.py status"))
         self.assertIsNone(self.guard("Bash", command="cat .gate/state.json"))
         self.assertIsNone(self.guard("Bash", command="git add .gate/state.json"))
-        self.assertIsNotNone(self.guard("Bash", command="python -X utf8 .gate/gate.py status && echo ok"))
         self.assertIsNotNone(self.guard("Bash", command="python -c \"open('.gate/state.json', 'w')\""))
+
+    def test_읽기_명령과_gate_명령은_이을_수_있고_쓰기는_막는다(self):
+        for cmd in ("python -X utf8 .gate/gate.py status && echo ok",
+                    "cd sub && wc -l .gate/state.json 2>/dev/null; git log -1 -- .gate/state.json",
+                    "grep -n '\"P0[12]\"' .gate/state.json | tail -3",
+                    "git commit -m \"docs: .gate/state.json 설명; a | b\" && python -X utf8 .gate/gate.py status 2>&1 | head"):
+            self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+        for cmd in ("cat .gate/state.json > x", "echo '{}' > .gate/state.json",
+                    "grep x .gate/state.json | awk '{print > \"y\"}'", "cat .gate/state.json & rm x",
+                    "echo \"$(python -c 1)\" .gate/state.json",
+                    "python -X utf8 .gate/gate.py status && python -c \"import json\""):
+            self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
+
+    def test_다른_명령에_이은_adopt도_승인_문장을_본다(self):
+        cmd = 'echo x && python -X utf8 .gate/gate.py adopt H001 --approved "그대로 적용해"'
+        self.assertIn("이번 턴 사용자 입력에 없다", self.guard("Bash", command=cmd))
+
+    def remote(self):
+        """[remote]를 켜고 chore 계획의 코드를 커밋해 둔다(테스트 설정의 chore IMPLEMENT는 실행 상태다)"""
+        self.edit(".gate/config.toml", ("[review]", '[remote]\nhost = "srv"\nexec_states = ["RECORD"]\n\n[review]'))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: remote").returncode, 0)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 새 파일 |"))
+        self.write("src/a.py", "a = 1\n")
+        self.git("add", "src", "plans")
+        self.assertEqual(self.git("commit", "-qm", "feat: a").returncode, 0)
+
+    def test_ssh로_저장소_코드를_그_자리에서_돌리면_실행_기록을_본다(self):
+        self.remote()
+        for cmd in ("ssh srv 'cd ~/p && python -X utf8 src/a.py --fold 0'", "ssh srv \"python -m src.a\"",
+                    "ssh srv 'bash src/chain.sh'"):
+            self.assertIn("ssh로 저장소 코드", self.guard("Bash", command=cmd), cmd)
+        for cmd in ("ssh srv 'nvidia-smi; tail -5 ~/p/log'", "ssh srv 'cd ~/p && source src/lib.sh && watch_x log'",
+                    "python -X utf8 src/a.py"):
+            self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+        self.assertEqual(self.gate("run", "P001", "--eta", "23:59", "--basis", "b").returncode, 0)
+        self.assertIsNone(self.guard("Bash", command="ssh srv 'cd ~/p && python -X utf8 src/a.py'"))
+        self.write("src/a.py", "a = 2\n")
+        self.assertIn("커밋하지 않은 코드", self.guard("Bash", command="ssh srv 'python src/a.py'"))
 
     def test_hook을_끄는_명령은_막고_메시지_속_단어는_막지_않는다(self):
         for cmd in ("git commit --no-verify -m x", "git commit -n -m x", "git commit -m 'x' -n",

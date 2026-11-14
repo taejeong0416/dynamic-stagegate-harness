@@ -31,7 +31,7 @@ COMMAND_USE = ("test", "affected")
 # [review] effort에 쓸 수 있는 claude --effort 값
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # review 지시문에 쓸 수 있는 자리
-REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff"}
+REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff", "context"}
 
 
 # lint
@@ -141,6 +141,8 @@ def lint(cfg):
                     fields = {f"형식 오류 {e}"}
                 bad += [f"{s}: review의 {{{x}}}는 쓸 수 없는 자리다(쓸 수 있는 것: {', '.join(sorted(REVIEW_FIELDS))})"
                         for x in sorted(fields - REVIEW_FIELDS)]
+                if "context" in fields and not st.get("context"):
+                    bad.append(f"{s}: review에 {{context}}를 쓰는데 상태의 context(발췌할 파일 목록)가 비었다")
         if uses_files and cfg["project"]["files_section"] not in ts:
             bad.append(f"{kname}: 파일 검사를 쓰는데 files_section '{cfg['project']['files_section']}' 절이 계획 틀에 없다")
     for s in cfg["project"]["stop_states"]:

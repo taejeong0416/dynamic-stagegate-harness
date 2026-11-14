@@ -176,6 +176,7 @@ todo = [
 ]
 checks = [
   {check = "clean"},
+  {check = "code_unchanged"},
   {check = "unchanged", state = "EVALSET", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["behavior"]},
   {check = "unchanged", state = "PLAN", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["prompt"]},
   {check = "test_edits", state = "EVALSET", section = "테스트 수정", only = ["behavior"]},

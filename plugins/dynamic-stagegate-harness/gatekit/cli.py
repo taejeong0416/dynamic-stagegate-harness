@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import evolve
 from .checks import run_checks
-from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, cfg_for, cond_holds, git, head, is_code, is_harness, is_test,
+from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code, is_harness, is_test,
                    load, log_event, next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot,
                    state_def, structure_problems, template_text)
 
@@ -123,7 +123,8 @@ def cmd_next(a, flow):
             if not m.startswith("검토자 호출"):  # 하네스 점검 자료. --review로 다시 부르라는 안내는 뺀다
                 log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state)
         sys.exit(1)
-    p.setdefault("passed", {})[state] = snapshot(s)
+    if state not in p.get("frozen", []):  # gate run 뒤에는 앞 상태의 스냅샷을 바꾸지 않는다(unchanged가 쓴다)
+        p.setdefault("passed", {})[state] = snapshot(s)
     p.setdefault("first_passed", {}).setdefault(state, head())  # back으로 지우지 않는다. test_edits가 쓴다
     nxt, _ = next_state(cfg_for(p), p, s, state)
     if nxt != "DONE" and p.get("visits", {}).get(nxt, 0) >= P["max_visits"]:
@@ -139,6 +140,29 @@ def cmd_next(a, flow):
         show_todo(pid, p)
 
 
+def freeze(p):
+    """이미 넘긴 상태의 스냅샷을 고정한다. 실행 결과가 보이기 시작하면 back으로 다시 넘겨도 unchanged의 기준이
+    바뀌지 않아, 결과를 본 뒤 판정 경계나 eval 케이스를 고쳐 통과하지 못한다"""
+    p["frozen"] = sorted(set(p.get("frozen", [])) | set(p.get("passed", {})))
+
+
+def results_seen(p):
+    """실행 상태에서 결과 파일(results 검사가 보는 로컬 파일) 하나라도 이 상태에 들어온 뒤에 생겼는가"""
+    st = state_def(p)
+    if not st.get("run"):
+        return False
+    if p.get("run"):
+        return True
+    since = p["entered"][p["state"]]["ts"]
+    s = sections(plan_text(p))
+    for spec in st.get("checks", []):
+        if spec.get("check") == "results":
+            paths = bullets(s.get(spec.get("section", "실행 계획"), [])).get(spec.get("item", "결과 파일"), "")
+            if any((ROOT / x).exists() and (ROOT / x).stat().st_mtime >= since for x in paths.replace(",", " ").split()):
+                return True
+    return False
+
+
 def cmd_back(a, flow):
     p = get_open(flow, a.pid)
     order = cfg_for(p)["kinds"][p["kind"]]["states"]
@@ -151,8 +175,11 @@ def cmd_back(a, flow):
                  "제안서를 쓴다")
     if p.get("visits", {}).get(a.state, 0) >= P["max_visits"]:
         sys.exit(f"{a.pid}가 {a.state}에 {P['max_visits']}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
+    if results_seen(p):  # gate run 없이 돌린 결과도 이미 나왔으면 고정한다
+        freeze(p)
     for st in order[order.index(a.state):]:
-        p.get("passed", {}).pop(st, None)
+        if st not in p.get("frozen", []):
+            p.get("passed", {}).pop(st, None)
     enter(p, a.state, f"back: {a.why}")
     save(flow)
     show_todo(a.pid, p)
@@ -165,6 +192,7 @@ def cmd_run(a, flow):
     if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", a.eta) or not a.basis.strip():
         sys.exit("--eta HH:MM과 --basis 근거가 필요하다")
     p["run"] = {"eta": a.eta, "basis": a.basis, "at": now(), "ts": time.time(), "commit": head()}
+    freeze(p)
     save(flow)
     print(f"{a.pid} 실행 기록: {a.eta}쯤 끝남({a.basis})")
 
