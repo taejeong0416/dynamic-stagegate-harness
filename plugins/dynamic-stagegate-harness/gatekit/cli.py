@@ -8,7 +8,8 @@ from pathlib import Path
 
 from . import evolve
 from .checks import run_checks
-from .core import (CFG, CLOSED, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code, is_harness, is_test,
+from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
+                   is_harness, is_test,
                    load, log_event, next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot,
                    state_def, structure_problems, template_text)
 
@@ -94,7 +95,8 @@ def cmd_start(a, flow):
     for k, v in (("종류", a.kind), ("선택", ", ".join(opts)), ("이어진 계획", a.from_ or "")):
         tpl = re.sub(rf"^- {k}:.*$", lambda _: f"- {k}: {v}".rstrip(), tpl, count=1, flags=re.M)
     (ROOT / plan).write_text(tpl, encoding="utf-8")
-    p = {"title": a.title, "kind": a.kind, "from": a.from_, "plan": plan, "version": CFG["version"], "options": opts}
+    p = {"title": a.title, "kind": a.kind, "from": a.from_, "plan": plan, "version": CFG["version"], "engine": ENGINE,
+         "options": opts}
     first_rec = {"at": now(), "ts": time.time(), "commit": head()}
     p["entered"] = {"_start": first_rec}
     advance(p, sections(tpl), None, "start")
@@ -127,9 +129,10 @@ def cmd_next(a, flow):
         p.setdefault("passed", {})[state] = snapshot(s)
     p.setdefault("first_passed", {}).setdefault(state, head())  # back으로 지우지 않는다. test_edits가 쓴다
     nxt, _ = next_state(cfg_for(p), p, s, state)
-    if nxt != "DONE" and p.get("visits", {}).get(nxt, 0) >= P["max_visits"]:
+    cap = cfg_for(p)["project"]["max_visits"]
+    if nxt != "DONE" and p.get("visits", {}).get(nxt, 0) >= cap:
         save(flow)
-        sys.exit(f"{pid}가 {nxt}에 {P['max_visits']}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
+        sys.exit(f"{pid}가 {nxt}에 {cap}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
     nxt, skipped = advance(p, s, state, "next")
     save(flow)
     if skipped:
@@ -173,8 +176,9 @@ def cmd_back(a, flow):
         where = f"{', '.join(allowed)}로만 돌아갈 수 있다" if allowed else "돌아갈 수 없다"
         sys.exit(f"{p['kind']}의 {p['state']}에서는 {where}(config.toml의 back). 다른 경로가 필요하면 구조 변경 "
                  "제안서를 쓴다")
-    if p.get("visits", {}).get(a.state, 0) >= P["max_visits"]:
-        sys.exit(f"{a.pid}가 {a.state}에 {P['max_visits']}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
+    cap = cfg_for(p)["project"]["max_visits"]
+    if p.get("visits", {}).get(a.state, 0) >= cap:
+        sys.exit(f"{a.pid}가 {a.state}에 {cap}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
     if results_seen(p):  # gate run 없이 돌린 결과도 이미 나왔으면 고정한다
         freeze(p)
     for st in order[order.index(a.state):]:
@@ -242,6 +246,8 @@ def status_text(flow):
     for pid, p in active.items():
         ver = p.get("version", CFG["version"])
         tag = f", 구조 v{ver}" if ver != CFG["version"] else ""
+        if p.get("engine", ENGINE) != ENGINE:
+            tag += f", 엔진 바뀜({p['engine']}에서 {ENGINE})"
         lines.append(f"{pid} {p['title']}: {p['state']} ({p['kind']}{tag}, 계획 파일 {p['plan']})")
         lines += ["  - " + t for t in todo(p)]
         if p.get("run"):
@@ -259,16 +265,17 @@ def staged():
 
 def cmd_pre_commit(a, flow):
     fail = []
-    code = [f for f in staged() if f and is_code(f)]
+    # 지금 구조나 진행 중인 계획의 구조 버전 중 하나라도 코드로 보는 파일. 허용 파일은 계획마다 자기 버전으로 뽑는다
+    code = [f for f in staged() if f and is_code_any(f, flow)]
     if code:
         allowed, tests_state = set(), {}
         for pid, p in flow["plans"].items():
             if p["state"] not in CLOSED and state_def(p).get("code"):
-                s = sections(plan_text(p))
-                files = plan_files(s)
+                s, cfg = sections(plan_text(p)), cfg_for(p)
+                files = plan_files(s, cfg)
                 if state_def(p).get("edit") == "tests":
-                    tests_state |= {f: f"{pid} {p['state']}" for f in files if not is_test(f)}
-                    files = [f for f in files if is_test(f)]
+                    tests_state |= {f: f"{pid} {p['state']}" for f in files if not is_test(f, cfg)}
+                    files = [f for f in files if is_test(f, cfg)]
                 allowed |= set(files)
                 if set(code) & set(files) and limit_problem(p, s):
                     fail.append(f"{pid}: {limit_problem(p, s)}")
@@ -277,7 +284,7 @@ def cmd_pre_commit(a, flow):
                 continue
             fail.append(f"{f}: {tests_state[f]}에서는 테스트 파일만 커밋한다" if f in tests_state else
                         f"{f}: 코드를 고치는 상태인 계획의 '{P['files_section']}' 절에 없는 파일이다")
-    for cmd in P["pre_commit"]:
+    for cmd in P["pre_commit"]:  # 커밋마다 한 번 도는 저장소 명령이라 지금 구조를 따른다
         r = subprocess.run(cmd, shell=True, cwd=ROOT)
         if r.returncode != 0:
             fail.append(f"pre_commit 명령 실패: {cmd}")

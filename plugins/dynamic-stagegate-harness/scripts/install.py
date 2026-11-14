@@ -51,6 +51,25 @@ def copy_engine(gate_dir):
             shutil.copy2(p / "config.toml", lib / f"{p.name}.toml")
 
 
+def engine_hash(d):
+    """gatekit/*.py 내용의 해시. gatekit.core.engine_version과 같은 계산이다"""
+    import hashlib
+    h = hashlib.sha256()
+    for f in sorted(Path(d).glob("*.py")):
+        h.update(f.name.encode() + b"\0" + f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:12]
+
+
+def open_plans(gate_dir):
+    """진행 중인 계획 번호. 엔진을 바꾸기 전에 알리기 위해서다"""
+    try:
+        proj = tomllib.loads((gate_dir / "config.toml").read_text(encoding="utf-8")).get("project", {})
+        state = json.loads((gate_dir.parent / proj.get("state_file", ".gate/state.json")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [pid for pid, p in state.get("plans", {}).items() if p.get("state") not in ("DONE", "ABANDONED")]
+
+
 def check_githooks(target):
     """git hook을 쓸 수 없는 저장소면 아무것도 복사하기 전에 멈춘다"""
     for name in GITHOOKS:
@@ -100,8 +119,13 @@ def main():
     if a.update:
         if not (gate_dir / "config.toml").exists():
             sys.exit("설치된 하네스가 없다. preset 이름을 주고 새로 설치한다")
+        before = engine_hash(gate_dir / "gatekit")
         copy_engine(gate_dir)
         write_githooks(target)
+        busy = open_plans(gate_dir)
+        if busy and engine_hash(gate_dir / "gatekit") != before:
+            print(f"경고: 진행 중인 계획 {', '.join(busy)}는 구조 버전은 그대로 쓰지만 검사 코드가 바뀐 엔진으로 넘어간다. "
+                  "status와 SessionStart가 '엔진 바뀜'으로 알린다. 가능하면 이 계획들을 끝낸 뒤 갱신한다.")
         print("엔진, GATE.md, 라이브러리, git hook을 갱신했다. 하네스 커밋으로 남긴다: "
               "git add .gate/gatekit .gate/gate.py .gate/GATE.md .gate/library .githooks, git commit -m \"harness: gatekit 갱신\"")
         return

@@ -469,15 +469,84 @@ def weakened(old, new):
                 out.append(f"{where}: 테스트 파일만 고치는 제한이 풀린다")
             if s in nk.get("when", {}) and nk["when"][s] != k.get("when", {}).get(s):
                 out.append(f"{where}: 건너뛰는 조건이 붙거나 바뀐다({fmt_cond(nk['when'][s])})")
+            if o.get("review") and n.get("review") and _model_rank(n.get("review_model")) < _model_rank(o.get("review_model")):
+                out.append(f"{where}: 검토 모델이 낮아진다({o.get('review_model') or '기본'}에서 {n.get('review_model')})")
         if k.get("limit") and nk.get("limit") != k["limit"]:
             out.append(f"{kname}: 상한이 빠지거나 바뀐다({fmt_cond(k['limit'])})")
+    return out + weakened_settings(old, new)
+
+
+# 설정 키마다 푸는 방향. less: 원소가 빠지면 푼다, more: 원소가 늘면 푼다, up: 수가 커지면 푼다
+LOOSEN = {
+    "project": {"less": ["code", "tracked", "stop_states", "status_sections", "harness", "protected", "tests",
+                         "pre_commit"],
+                "more": ["unreviewed"], "up": ["max_visits", "review_every_plans", "review_every_events"],
+                "cleared": ["test", "affected", "decisions_file", "status_file"]},
+    "review": {"more": ["tools"]},
+    "remote": {"more": ["exec_states"], "cleared": ["host"]},
+}
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+
+
+def _model_rank(m):
+    """검토 모델의 순서. 지정하지 않은 기본 모델과 opus를 가장 높게 본다"""
+    m = (m or "").lower()
+    return 0 if "haiku" in m else 1 if "sonnet" in m else 2
+
+
+def _items(v):
+    if isinstance(v, str):
+        return {x.strip() for x in v.split(",") if x.strip()}
+    return set(v or [])
+
+
+def weakened_settings(old, new):
+    """[project], [review], [remote], [[stages]]에서 검사를 푸는 변경. 방향을 정할 수 없는 키 변경은 '바뀐 설정'으로 둔다"""
+    out = []
+    for part, rules in LOOSEN.items():
+        o, n = old.get(part, {}), new.get(part, {})
+        judged = set()
+        for key in rules.get("less", []):
+            judged.add(key)
+            gone = sorted(_items(o.get(key)) - _items(n.get(key)))
+            if gone:
+                out.append(f"[{part}] {key}: {', '.join(gone)}가 빠진다")
+        for key in rules.get("more", []):
+            judged.add(key)
+            added = sorted(_items(n.get(key)) - _items(o.get(key)))
+            if added:
+                out.append(f"[{part}] {key}: {', '.join(added)}가 늘어난다")
+        for key in rules.get("up", []):
+            judged.add(key)
+            if isinstance(o.get(key), (int, float)) and isinstance(n.get(key), (int, float)) and n[key] > o[key]:
+                out.append(f"[{part}] {key}: {o[key]}에서 {n[key]}로 커진다")
+        for key in rules.get("cleared", []):
+            judged.add(key)
+            if o.get(key) and not n.get(key):
+                out.append(f"[{part}] {key}: 값이 빠진다({o[key]})")
+        if part == "review":
+            judged |= {"model", "effort"}
+            if _model_rank(n.get("model")) < _model_rank(o.get("model")):
+                out.append(f"[review] model: {o.get('model') or '기본'}에서 {n.get('model')}로 낮아진다")
+            oe, ne = o.get("effort"), n.get("effort")
+            if oe in EFFORTS and (ne not in EFFORTS or EFFORTS.index(ne) < EFFORTS.index(oe)):
+                out.append(f"[review] effort: {oe}에서 {ne or '지정 없음'}로 낮아진다")
+        for key in sorted(set(o) | set(n)):
+            if key not in judged and o.get(key) != n.get(key):
+                out.append(f"[{part}] {key}: 바뀐 설정({o.get(key)!r}에서 {n.get(key)!r}). 검사를 푸는 변경인지 본다")
+    ostages = {st["n"]: set(st.get("kinds", [])) for st in old.get("stages", [])}
+    for st in new.get("stages", []):
+        added = sorted(set(st.get("kinds", [])) - ostages.get(st["n"], set(st.get("kinds", []))))
+        if added:
+            out.append(f"[[stages]] {st['n']}단계: 허용 종류 {', '.join(added)}가 늘어난다")
     return out
 
 
 REVIEW = ("하네스 구조 변경 제안서 {path}를 검토한다. 지금 구조 .gate/config.toml, 목적 .gate/PROFILE.md(없으면 건너뛴다), "
           "진단과 검사 결과 {diag}를 읽는다. 다음을 찾는다. (1) 진단 파일의 '빼거나 푸는 변경' 항목 가운데 '바꾸는 것' 표에 "
           "근거가 없거나 근거가 진단 자료의 수치나 PROFILE과 맞지 않는 것 (2) PROFILE의 목적과 어긋나는 변경 (3) 근거 없이 "
-          "넣은 새 상태나 경로 (4) '진행 중인 계획' 절이 재생 결과와 다른 것.")
+          "넣은 새 상태나 경로 (4) '진행 중인 계획' 절이 재생 결과와 다른 것 (5) 같은 목록의 '바뀐 설정' 항목 가운데 "
+          "실제로는 검사를 푸는데(검사 범위가 줄거나, 검토가 약해지거나, 막던 행동이 열림) '바꾸는 것' 표에 근거가 없는 것.")
 
 
 def check_proposal(flow, hid, allow_review):

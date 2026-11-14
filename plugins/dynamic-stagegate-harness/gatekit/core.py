@@ -61,8 +61,23 @@ def parse_config(text):
 
 
 CFG = parse_config((GATE_DIR / "config.toml").read_text(encoding="utf-8"))
+# 지금 구조의 [project]. 계획마다 다를 수 있는 값(code, tests, files_section, max_visits, stop_states, test, affected,
+# unreviewed)은 계획 판단에서 cfg_for(p)로 읽고, P는 저장소 전체에 하나뿐인 값(plans_dir, state_file, plan_prefix,
+# harness, protected, harness_prefix, tracked, pre_commit, status와 decisions 파일, 점검 권장 기준)과 계획이 없는
+# 판단에만 쓴다
 P = CFG["project"]
 _versions = {CFG["version"]: CFG}
+
+
+def engine_version():
+    """엔진(gatekit/*.py) 내용의 해시. 계획을 시작할 때 남겨, 엔진이 바뀐 진행 중 계획을 알린다"""
+    h = hashlib.sha256()
+    for f in sorted(Path(__file__).parent.glob("*.py")):
+        h.update(f.name.encode() + b"\0" + f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:12]
+
+
+ENGINE = engine_version()
 
 
 def cfg_for(p=None):
@@ -110,7 +125,7 @@ def cond_holds(cond, p, s, cfg):
             files = changed_since(since) | {x for _, x in dirty()}
             ok = any(match(f, v) for f in files)
         elif key == "max_files":
-            ok = len(plan_files(s)) <= v
+            ok = len(plan_files(s, cfg)) <= v
         elif key == "not":
             ok = not cond_holds(v, p, s, cfg)
         elif key == "any":
@@ -171,19 +186,35 @@ def match(path, globs):
 
 
 def is_harness(path):
-    return match(path, P["harness"])
+    return match(path, P["harness"])  # 구조 파일 목록은 지금 구조를 따른다
 
 
-def is_code(path):
-    return match(path, P["code"]) and not is_harness(path)
+def is_code(path, cfg=None):
+    """cfg(계획의 구조 버전, 없으면 지금 구조)의 code 패턴에 맞는 하네스 밖 파일"""
+    return match(path, (cfg or CFG)["project"]["code"]) and not is_harness(path)
 
 
 def is_protected(path):
     return match(path, P["protected"])
 
 
-def is_test(path):
-    return match(path, P["tests"])
+def is_test(path, cfg=None):
+    return match(path, (cfg or CFG)["project"]["tests"])
+
+
+def open_cfgs(flow):
+    """지금 구조와 진행 중인 계획들의 구조 버전. 여러 계획을 합치는 판단(guard, stop)은 이 가운데 하나라도 코드로
+    보면 코드로 본다. 버전이 바뀐 뒤에도 앞 버전 계획의 코드 파일이 검사 밖으로 빠지지 않게 하기 위해서다"""
+    out = {CFG["version"]: CFG}
+    for p in (flow or {}).get("plans", {}).values():
+        if p["state"] not in CLOSED:
+            c = cfg_for(p)
+            out.setdefault(c["version"], c)
+    return list(out.values())
+
+
+def is_code_any(path, flow):
+    return any(is_code(path, c) for c in open_cfgs(flow))
 
 
 # git
@@ -211,8 +242,11 @@ def dirty(*paths):
     return out
 
 
-def dirty_code():
-    return [x for x in dirty() if is_code(x[1])]
+def dirty_code(cfg=None, flow=None):
+    """커밋하지 않은 코드 변경. flow를 주면 진행 중인 계획들의 구조 버전 중 하나라도 코드로 보는 파일"""
+    if flow is not None:
+        return [x for x in dirty() if is_code_any(x[1], flow)]
+    return [x for x in dirty() if is_code(x[1], cfg)]
 
 
 def git_path(name):
@@ -251,7 +285,7 @@ def code_open(flow):
 def tests_only(flow, path):
     """코드 상태인 계획이 모두 테스트만 쓰는 상태(edit = "tests")이고 path가 테스트 파일이 아니면 막는 이유"""
     plans = {pid: p for pid, p in flow["plans"].items() if p["state"] not in CLOSED and state_def(p).get("code")}
-    if not plans or is_test(path) or any(state_def(p).get("edit") != "tests" for p in plans.values()):
+    if not plans or any(is_test(path, cfg_for(p)) or state_def(p).get("edit") != "tests" for p in plans.values()):
         return None
     where = ", ".join(f"{pid} {p['state']}" for pid, p in plans.items())
     return (f"코드를 고치는 계획이 테스트만 쓰는 상태({where})라 테스트 파일이 아닌 {path}를 막았다. "
@@ -263,7 +297,7 @@ def open_files(flow):
     out = set()
     for p in flow["plans"].values():
         if p["state"] not in CLOSED and state_def(p).get("code"):
-            out |= set(plan_files(sections(plan_text(p))))
+            out |= set(plan_files(sections(plan_text(p)), cfg_for(p)))
     return out
 
 
@@ -272,9 +306,10 @@ def run_open(flow):
 
 
 def exec_open(flow):
-    """ssh로 저장소 코드를 그 자리에서 돌려도 되는가: gate run 기록이 있는 실행 상태나 [remote] exec_states의 상태"""
-    states = CFG["remote"].get("exec_states", [])
-    return run_open(flow) or any(p["state"] in states for p in flow["plans"].values() if p["state"] not in CLOSED)
+    """ssh로 저장소 코드를 그 자리에서 돌려도 되는가: gate run 기록이 있는 실행 상태나, 계획 구조 버전의
+    [remote] exec_states에 있는 상태"""
+    return run_open(flow) or any(p["state"] in cfg_for(p)["remote"].get("exec_states", [])
+                                 for p in flow["plans"].values() if p["state"] not in CLOSED)
 
 
 # 계획 파일
@@ -373,13 +408,13 @@ def plan_text(p):
 PATH_TOKEN = re.compile(r"[\w.][\w./-]*")
 
 
-def plan_files(s):
-    """계획이 고치겠다고 적은 코드 파일(files_section 절의 경로 중 code 패턴에 맞는 것).
+def plan_files(s, cfg=None):
+    """계획이 고치겠다고 적은 코드 파일(계획 구조 버전의 files_section 절 경로 중 code 패턴에 맞는 것).
     표가 있으면 첫 칸만 본다. 설명 칸에 적은 경로를 고칠 파일로 치지 않기 위해서다"""
-    lines = s.get(P["files_section"], [])
+    lines = s.get((cfg or CFG)["project"]["files_section"], [])
     rows = [r for t in tables(lines) for r in t if r]
     text = "\n".join(r[0] for r in rows) if rows else "\n".join(lines)
-    return sorted({t.strip("`") for t in PATH_TOKEN.findall(text.replace("`", " ")) if is_code(t.strip("`"))})
+    return sorted({t.strip("`") for t in PATH_TOKEN.findall(text.replace("`", " ")) if is_code(t.strip("`"), cfg)})
 
 
 # 코드 속 숫자
@@ -475,19 +510,19 @@ REMOTE_EXEC = re.compile(r"(?<![\w./-])(?:python3?|py|torchrun|node|bash|sh|Rscr
 SSH_AT = re.compile(CMD_AT + r"ssh\b[^\n]*", re.M)
 
 
-def remote_exec_paths(cmd):
+def remote_exec_paths(cmd, flow=None):
     """명령 자리의 ssh가 돌리는 저장소 코드 파일. -m 모듈은 a/b.py로 바꿔 code 패턴에 맞춘다"""
     out = []
     for m in SSH_AT.finditer(cmd):
         for mod, path in REMOTE_EXEC.findall(m.group(0)):
             f = mod.replace(".", "/") + ".py" if mod else path
-            if is_code(f):
+            if is_code_any(f, flow):
                 out.append(f)
     return out
 
 
 def remote_on():
-    return bool(CFG["remote"].get("host"))
+    return bool(CFG["remote"].get("host"))  # 서버 주소는 저장소에 하나라 지금 구조를 따른다
 
 
 class Lock:

@@ -59,14 +59,14 @@ def covers(ctx, spec):
 @check
 def files_listed(ctx, spec):
     """계획이 고칠 코드 파일을 적었다"""
-    return [] if plan_files(ctx["s"]) else [f"'{CFG['project']['files_section']}' 절에 config의 code 패턴에 맞는 파일이 없다"]
+    return [] if plan_files(ctx["s"], ctx["cfg"]) else [f"'{ctx['cfg']['project']['files_section']}' 절에 config의 code 패턴에 맞는 파일이 없다"]
 
 
 @check
 def files_changed(ctx, spec):
     """적은 코드 파일이 이 상태에 처음 들어온 뒤의 커밋에서 모두 바뀌었다. any = true면 하나 이상"""
     since = first(ctx["p"], ctx["state"])["commit"]
-    files = plan_files(ctx["s"])
+    files = plan_files(ctx["s"], ctx["cfg"])
     changed = changed_since(since, *files) if files else set()
     if spec.get("any"):
         return [] if changed else [f"적은 코드 파일 중 {ctx['state']}에 들어온 뒤 커밋에서 바뀐 것이 없다"]
@@ -76,7 +76,7 @@ def files_changed(ctx, spec):
 @check
 def clean(ctx, spec):
     """코드에 커밋하지 않은 변경이 없다"""
-    d = dirty_code()
+    d = dirty_code(ctx["cfg"])
     return [] if not d else ["커밋하지 않은 코드 변경이 있다: " + ", ".join(p for _, p in d[:8])]
 
 
@@ -87,7 +87,7 @@ def numbers(ctx, spec):
     vals = {num_value(r[0]) for t in tables(ctx["s"].get(name, [])) for r in t if r and r[0]}
     since = first(ctx["p"], ctx["state"])["commit"]
     return [f"'{name}' 표의 값 칸에 없는 숫자 {n} ({where}). 값 칸에는 숫자 하나만 쓴다"
-            for n, where in new_numbers(since, plan_files(ctx["s"])).items() if num_value(n) not in vals]
+            for n, where in new_numbers(since, plan_files(ctx["s"], ctx["cfg"])).items() if num_value(n) not in vals]
 
 
 @check
@@ -95,7 +95,7 @@ def sample(ctx, spec):
     """표본 실행 절의 명령, 결과 요약, 커밋이 있고, 커밋이 적은 코드 파일을 마지막으로 바꾼 커밋이다"""
     name = spec.get("section", "표본 실행")
     b = bullets(ctx["s"].get(name, []))
-    files = plan_files(ctx["s"])
+    files = plan_files(ctx["s"], ctx["cfg"])
     last = git("log", "-1", "--format=%h", "--", *files).strip() if files else ""
     c = b.get("커밋", "")
     if not b.get("명령") or not b.get("결과 요약") or not c or c[:7] != last[:7]:
@@ -134,7 +134,7 @@ def missing_program(cmd):
 
 def test_fingerprint(ctx, cmd):
     """명령과, 계획을 시작한 뒤 바뀐 테스트 파일의 커밋된 내용"""
-    files = sorted(f for f in changed_since(ctx["p"]["entered"]["_start"]["commit"]) if is_test(f))
+    files = sorted(f for f in changed_since(ctx["p"]["entered"]["_start"]["commit"]) if is_test(f, ctx["cfg"]))
     blobs = git("ls-tree", "-r", "HEAD", "--", *files) if files else ""
     return hashlib.sha256((cmd + "\n" + blobs).encode("utf-8")).hexdigest()[:16]
 
@@ -147,7 +147,7 @@ def command(ctx, spec):
     expect = "fail"이면 실패해야 통과한다(버그 재현, 테스트 먼저 쓰기). 이때 reject의 종료 코드(기본 NOT_RUN)나
     찾지 못한 프로그램은 테스트를 돌리지 못한 것으로 보고 막는다. 같은 명령과 같은 테스트 파일로 실패를 한 번
     확인했으면 다시 돌리지 않는다. 구현한 뒤 back으로 이 상태에 돌아와도 넘어갈 수 있게 하기 위해서다"""
-    proj, use = CFG["project"], spec.get("use")
+    proj, use = ctx["cfg"]["project"], spec.get("use")
     cmd = spec.get("run") or ((proj.get(use) or (proj.get("test", "") if use == "affected" else "")) if use else "")
     if not cmd and spec.get("section"):
         cmd = bullets(sec(ctx, spec)).get(spec.get("item", "명령"), "").strip("` ")
@@ -156,7 +156,7 @@ def command(ctx, spec):
             return []
         where = f"'{spec.get('section')}' 절의 '{spec.get('item', '명령')}'" if spec.get("section") else "명령"
         return [f"{where}이 비었다" + (f"(config [project] {use}도 비었다)" if use else "")]
-    cmd = cmd.replace("{files}", " ".join(plan_files(ctx["s"])))
+    cmd = cmd.replace("{files}", " ".join(plan_files(ctx["s"], ctx["cfg"])))
     fail = spec.get("expect") == "fail"
     if fail:
         key = test_fingerprint(ctx, cmd)
@@ -175,7 +175,7 @@ def command(ctx, spec):
         return [f"`{cmd}`가 테스트를 돌리지 못한 것으로 보인다(종료 코드 {r.returncode}). 테스트가 돌고 실패해야 한다. "
                 f"이 도구에서 이 코드가 테스트 실패라면 검사의 reject를 바꾸는 제안서를 쓴다.\n{tail}"]
     if (r.returncode != 0) if fail else (r.returncode == 0):
-        if fail and not dirty_code():
+        if fail and not dirty_code(ctx["cfg"]):
             ctx["p"].setdefault("proven_fail", {})[key] = now()
         return []
     want = "실패해야" if fail else "통과해야"
@@ -186,11 +186,11 @@ def command(ctx, spec):
 def code_unchanged(ctx, spec):
     """이 상태에 들어온 뒤 계획의 코드 파일에 커밋도, 커밋하지 않은 변경도 없다. 결과가 앞 상태에서 검사받은 코드에서
     나왔는지 본다. 바뀌었으면 코드 상태로 돌아가 다시 지난 뒤 다시 실행한다"""
-    files = plan_files(ctx["s"])
+    files = plan_files(ctx["s"], ctx["cfg"])
     if not files:
         return []
     since = ctx["p"]["entered"][ctx["state"]]["commit"]
-    moved = sorted(changed_since(since, *files) | {f for _, f in dirty_code() if f in files})
+    moved = sorted(changed_since(since, *files) | {f for _, f in dirty_code(ctx["cfg"]) if f in files})
     return [f"{ctx['state']}에 들어온 뒤 계획의 코드 파일 {', '.join(moved)}가 바뀌었다. 결과가 앞에서 검사받은 코드에서 "
             "나왔다고 볼 수 없어, 코드 상태로 back해 다시 지난 뒤 다시 실행한다"] if moved else []
 
@@ -298,9 +298,9 @@ def test_edits(ctx, spec):
     base = p.get("first_passed", {}).get(st) if st else None
     after = f"{st}를 넘긴 뒤" if base else "계획을 시작한 뒤"
     base = base or p["entered"]["_start"]["commit"]
-    listed = set(plan_files(ctx["s"]))
+    listed = set(plan_files(ctx["s"], ctx["cfg"]))
     files = [f for f in git("diff", "--name-only", "--diff-filter=DMRT", f"{base}..HEAD").splitlines()
-             if is_test(f) and f in listed]
+             if is_test(f, ctx["cfg"]) and f in listed]
     noted = {r[0].strip("` ") for t in tables(sec(ctx, spec)) for r in filled(t)}
     return [f"{f}는 {after} 고치거나 지운 테스트 파일이다. '{spec['section']}' 표에 파일과 고친 이유를 쓴다"
             for f in files if f not in noted]
@@ -337,8 +337,8 @@ def plan_diff(ctx, base=None):
     머리에 범위와, 계획을 시작한 뒤 '변경 파일' 표와 다르게 바뀐 파일을 적는다"""
     p, files_section = ctx["p"], ctx["cfg"]["project"]["files_section"]
     start = p["entered"]["_start"]["commit"]
-    listed, changed = plan_files(ctx["s"]), changed_since(start)
-    code = sorted(f for f in changed if is_code(f))
+    listed, changed = plan_files(ctx["s"], ctx["cfg"]), changed_since(start)
+    code = sorted(f for f in changed if is_code(f, ctx["cfg"]))
     target = listed or code
     scope = f"{base}..HEAD, 앞 검토를 통과한 뒤의 변경만" if base else f"{start}..HEAD, 계획을 시작한 뒤의 커밋"
     head = [f"# {ctx['pid']} 코드 diff ({scope}, '{files_section}' 표의 파일)",
@@ -356,7 +356,7 @@ def context_file(ctx, st):
     """검토자가 먼저 읽을 발췌. 상태의 context에 적은 파일마다, context_full자 이하면 전문, 넘으면 마크다운 제목과
     제목마다 첫 줄, 계획 파일이 인용한 참조([review] cite 패턴과 계획 번호)가 든 줄, csv면 머리 행을 담는다"""
     text = ctx["text"]
-    pats = CFG["review"].get("cite", [CITE_DEFAULT])
+    pats = ctx["cfg"]["review"].get("cite", [CITE_DEFAULT])
     cited = {ctx["pid"]} | {x for pat in pats for x in re.findall(pat, text)}
     out = [f"# {ctx['pid']} {ctx['state']} 검토 발췌", "",
            f"계획 파일이 인용한 참조: {', '.join(sorted(cited))}", ""]
@@ -366,7 +366,7 @@ def context_file(ctx, st):
             out += [f"## {rel}", "", "(없음)", ""]
             continue
         lines = f.read_text(encoding="utf-8").splitlines()
-        if sum(len(l) + 1 for l in lines) <= CFG["review"]["context_full"]:
+        if sum(len(l) + 1 for l in lines) <= ctx["cfg"]["review"].get("context_full", 6000):
             out += [f"## {rel} (전문)", ""] + lines + [""]
             continue
         keep, after_head = [], False
@@ -405,7 +405,7 @@ def review_check(ctx, st):
             return []
         if base and not plan_diff(ctx, base)[1].strip():
             return []  # 통과한 뒤 코드가 바뀌지 않았다
-    model = st.get("review_model") or CFG["review"].get("model")
+    model = st.get("review_model") or ctx["cfg"]["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
     fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state}
@@ -417,7 +417,7 @@ def review_check(ctx, st):
         fields["diff"] = rel_path(f)
     if "{context}" in st["review"]:
         fields["context"] = context_file(ctx, st)
-    result, meta = call_reviewer(st["review"].format(**fields), model)
+    result, meta = call_reviewer(st["review"].format(**fields), model, ctx["cfg"])
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
@@ -427,20 +427,22 @@ def review_check(ctx, st):
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 
 
-def call_reviewer(prompt, model=None):
+def call_reviewer(prompt, model=None, cfg=None):
     """읽기 도구만 쓰는 별도 Claude 호출. ({pass, missing}, {session, cost, model}). 호출이 실패하면 FAIL.
-    사용자 설정을 읽지 않으므로 추론 단계는 [review] effort로 넘기고, MCP 서버와 skill 목록은 싣지 않는다"""
+    사용자 설정을 읽지 않으므로 추론 단계는 [review] effort로 넘기고, MCP 서버와 skill 목록은 싣지 않는다.
+    cfg는 계획이 쓰는 구조 버전이고, 없으면 지금 구조(제안서 검토)다"""
+    rv = (cfg or CFG)["review"]
     prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. "
                "파일을 고치지 않는다.")
-    effort = CFG["review"].get("effort")
+    effort = rv.get("effort")
     err = ""
     try:
         r = subprocess.run([shutil.which("claude") or "claude", "-p", *(["--model", model] if model else []),
                             *(["--effort", effort] if effort else []), "--strict-mcp-config", "--disable-slash-commands",
-                            "--setting-sources", "local", "--tools", CFG["review"].get("tools", "Read,Grep,Glob"),
+                            "--setting-sources", "local", "--tools", rv.get("tools", "Read,Grep,Glob"),
                             "--no-session-persistence", "--output-format", "json", "--json-schema", REVIEW_SCHEMA],
                            cwd=ROOT, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                           timeout=CFG["review"].get("timeout", 600), env=os.environ | {"GATE_REVIEW": "1"})
+                           timeout=rv.get("timeout", 600), env=os.environ | {"GATE_REVIEW": "1"})
         err = r.stderr.strip()[-200:]
         out = json.loads(r.stdout)
         return out["structured_output"], {"session": out.get("session_id"), "cost": out.get("total_cost_usd"),

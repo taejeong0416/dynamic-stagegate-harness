@@ -119,7 +119,7 @@ def code_gate(path, flow):
 
 def guard(inp):
     global CMD
-    from .core import (ROOT, STATE, dirty_code, exec_open, is_code, is_protected, load, remote_exec_paths, remote_on,
+    from .core import (ROOT, STATE, dirty_code, exec_open, is_code_any, is_protected, load, remote_exec_paths, remote_on,
                        run_open, LAUNCH, UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
@@ -133,8 +133,9 @@ def guard(inp):
         if is_protected(path):
             deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .gate/proposals/H###.md에 제안서를 쓰고 "
                  "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(evolve skill).")
-        if is_code(path):
-            why = code_gate(path, load())
+        flow = load()
+        if is_code_any(path, flow):  # 지금 구조나 진행 중인 계획의 구조 버전 중 하나라도 코드로 보면 코드다
+            why = code_gate(path, flow)
             if why:
                 deny(why)
         return
@@ -157,13 +158,13 @@ def guard(inp):
     for m in SHELL_WRITE.finditer(cmd):
         if is_protected(m.group(2)):
             deny(f"{m.group(2)}는 하네스 구조 파일이라 셸로 쓰지 않는다. 제안서와 adopt로 바꾼다.")
-        if is_code(m.group(2)):
+        if is_code_any(m.group(2), flow):
             why = code_gate(m.group(2), flow)
             if why:
                 deny(f"셸로 {m.group(2)}를 쓰는 것을 막았다. " + why)
-    execs = remote_exec_paths(cmd) if remote_on() else []
+    execs = remote_exec_paths(cmd, flow) if remote_on() else []
     if remote_on() and (LAUNCH.search(cmd) or UPLOAD.search(cmd) or execs):
-        d = dirty_code()
+        d = dirty_code(flow=flow)
         if d:
             deny("커밋하지 않은 코드가 있어 서버 실행과 업로드를 막았다. 커밋한 뒤 다시 실행한다: "
                  + ", ".join(p for _, p in d[:8]))
@@ -262,11 +263,11 @@ def eta_passed(run):
 
 
 def stop_problems(inp):
-    from .core import (P, ROOT, STATE, dirty, is_code, is_harness, load, remote_exec_paths, remote_on, sections, state_def,
-                       LAUNCH)
+    from .core import (P, ROOT, STATE, cfg_for, dirty, is_code_any, is_harness, load, remote_exec_paths, remote_on,
+                       sections, state_def, LAUNCH)
     from .checks import results
-    t = read_transcript(inp["transcript_path"], LAUNCH, remote_exec_paths)
     flow = load()
+    t = read_transcript(inp["transcript_path"], LAUNCH, lambda c: remote_exec_paths(c, flow))
     state_rel = STATE.relative_to(ROOT).as_posix()
     edited, edited_turn = set(t["edited"]), set(t["edited_turn"])
     if t["own_turn"]:  # 이번 턴의 gate 명령이 쓴 상태 파일
@@ -274,10 +275,10 @@ def stop_problems(inp):
         edited_turn.add(state_rel)
 
     def blocking(path):  # 코드, 하네스, 상태 파일은 막고 문서는 알리기만 한다
-        return path == state_rel or is_code(path) or is_harness(path)
+        return path == state_rel or is_code_any(path, flow) or is_harness(path)
 
     problems, notes = [], []
-    lines = dirty(*(P["tracked"] or ["."]))
+    lines = dirty(*(P["tracked"] or ["."]))  # 저장소 전체에 하나인 목록이라 지금 구조를 따른다
     code = [f"{st} {path}" for st, path in lines if path in edited and blocking(path)]
     docs = [f"{st} {path}" for st, path in lines if path in edited_turn and not blocking(path)]
     if code:
@@ -296,14 +297,14 @@ def stop_problems(inp):
         if p.get("hold") and p["hold"]["quote"] in t["prompt"]:
             continue
         st = state_def(p)
-        if p["state"] in P["stop_states"]:
+        if p["state"] in cfg_for(p)["project"]["stop_states"]:
             problems.append(f"{pid} {p['title']}가 {p['state']}에 머물러 있다. 할 일을 하고 "
                             f"python -X utf8 .gate/gate.py next {pid}로 넘긴다.")
         elif st.get("run") and p.get("run") and (t["notified"] or eta_passed(p["run"])):
             spec = next((c for c in st.get("checks", []) if c["check"] == "results"), None)
             if spec:
                 s = sections((ROOT / p["plan"]).read_text(encoding="utf-8"))
-                ctx = {"pid": pid, "p": p, "s": s, "state": p["state"]}
+                ctx = {"pid": pid, "p": p, "s": s, "state": p["state"], "cfg": cfg_for(p)}
                 if not results(ctx, spec):
                     problems.append(f"{pid} {p['title']}의 결과 파일이 모두 생겼다. python -X utf8 .gate/gate.py next {pid}로 "
                                     "넘어가 기록한다.")
@@ -340,7 +341,7 @@ def stop(inp):
 
 def context(event):
     from .cli import status_text
-    from .core import CLOSED, P, ROOT, load
+    from .core import CLOSED, ENGINE, P, ROOT, load
     flow = load()
     if event == "prompt":  # 매 메시지에는 계획마다 한 줄만
         active = [f"{pid} {p['title']}: {p['state']}" for pid, p in flow["plans"].items() if p["state"] not in CLOSED]
@@ -360,6 +361,10 @@ def context(event):
         for title in P["status_sections"]:
             m = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
             parts.append(f"## {title}(머리)\n" + "\n".join(heads(m.group(1).strip() if m else "")))
+    moved = [pid for pid, p in flow["plans"].items() if p["state"] not in CLOSED and p.get("engine", ENGINE) != ENGINE]
+    if moved:
+        parts.append(f"[엔진 변경] {', '.join(moved)}는 시작한 뒤 엔진(.gate/gatekit)이 바뀌었다. 구조 버전은 그대로지만 "
+                     "검사 코드가 달라졌을 수 있으니, 다음 next가 예상과 다르게 막거나 통과하면 사용자에게 알린다.")
     from .evolve import review_due
     why = review_due(flow)
     if why:

@@ -386,6 +386,46 @@ class FlowTest(Repo):
         self.assertIn("## 다음에 볼 것(머리)\n1. 항목 1 긴 설명", ctx)
         self.assertIn("…", ctx)
 
+    def bump_structure(self, *pairs):
+        """adopt를 거치지 않고 구조를 다음 버전으로 바꾼다(앞 버전은 history에 남긴다)"""
+        cfg = self.root / ".gate" / "config.toml"
+        (self.root / ".gate" / "history").mkdir(exist_ok=True)
+        shutil.copy(cfg, self.root / ".gate" / "history" / "v1.toml")
+        self.edit(".gate/config.toml", ("version = 1", "version = 2"), *pairs)
+
+    def test_구조가_바뀌어도_진행_중인_계획은_시작할_때의_project_값을_쓴다(self):
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.fill_chore("P001")
+        self.bump_structure(('code = ["src/*", "app/*",', 'code = ["app/*",'), ("max_visits = 3", "max_visits = 1"))
+        # 새 구조에서는 src/가 코드가 아니지만, v1로 시작한 P001에서는 코드라 표에 없는 파일은 막는다
+        self.assertIn("'변경 파일' 절에 없어", self.guard("Write", file_path=str(self.root / "src" / "other.py")))
+        self.assertIsNone(self.guard("Write", file_path=str(self.root / "src" / "a.py")))
+        self.write("src/other.py", "b = 2\n")
+        self.git("add", "src/other.py")
+        self.assertIn("src/other.py: 코드를 고치는 상태인 계획", self.gate("git-pre-commit").stdout)
+        self.git("reset", "-q", "src/other.py")
+        (self.root / "src" / "other.py").unlink()
+        self.write("src/a.py", "a = 2\n")
+        self.git("add", "src/a.py", "plans")
+        r = self.git("commit", "-qm", "feat: a")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("P001 t: RECORD", self.gate("next", "P001").stdout)  # v1의 files_section과 code로 파일을 찾는다
+        self.gate("back", "P001", "IMPLEMENT", "--why", "w")  # v1의 max_visits 3이라 한 번 더 들어올 수 있다
+        self.assertIn("P001 t: IMPLEMENT", self.gate("status").stdout)
+
+    def test_엔진이_바뀐_진행_중_계획을_알리고_update가_경고한다(self):
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.assertNotIn("엔진 바뀜", self.gate("status").stdout)
+        with open(self.root / ".gate" / "gatekit" / "checks.py", "a", encoding="utf-8") as f:
+            f.write("\n# 엔진 수정\n")
+        self.assertIn("엔진 바뀜", self.gate("status").stdout)
+        r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "session"], self.root, "{}",
+                ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+        self.assertIn("[엔진 변경] P001", r.stdout)
+        r = self.install("--update")
+        self.assertIn("경고: 진행 중인 계획 P001", r.stdout)
+        self.assertNotIn("엔진 바뀜", self.gate("status").stdout)  # 시작할 때와 같은 엔진으로 돌아왔다
+
     def test_chore는_affected_명령에_계획의_파일을_넣어_돌린다(self):
         self.edit(".gate/config.toml", ('affected = ""', 'affected = "git grep -q zzz -- {files}"'))
         self.git("add", ".gate/config.toml")
@@ -511,6 +551,25 @@ class FeatureTest(Repo):
                       diag)
         self.assertIn("- feature/TESTFIRST: 테스트 파일만 고치는 제한이 풀린다", diag)
         self.assertNotIn("bugfix/REPRO", diag)
+
+    def test_제안서_진단에_project_review_remote_설정을_푸는_변경이_나온다(self):
+        cfg = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        new = cfg.replace("version = 1", "version = 2", 1)
+        new = new.replace('code = ["src/*", "app/*",', 'code = ["app/*",', 1)
+        new = new.replace('unreviewed = ["테스트 결과",', 'unreviewed = ["요구사항", "테스트 결과",', 1)
+        new = new.replace("max_visits = 3", "max_visits = 9", 1)
+        new = new.replace('tools = "Read,Grep,Glob"\n', 'tools = "Read,Grep,Glob,Bash"\nmodel = "haiku"\ncontext_full = 9000\n', 1)
+        new = new.replace('effort = "high"', 'effort = "low"', 1)
+        new = new.replace('stop_states = ["RECORD"]', "stop_states = []", 1)
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| 설정 | 없음 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n\n## 새 구조\n\n```toml\n" + new + "\n```\n")
+        self.gate("check-proposal", "H001")
+        diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        for line in ("[project] code: src/*가 빠진다", "[project] unreviewed: 요구사항가 늘어난다",
+                     "[project] max_visits: 3에서 9로 커진다", "[project] stop_states: RECORD가 빠진다",
+                     "[review] tools: Bash가 늘어난다", "[review] model: 기본에서 haiku로 낮아진다",
+                     "[review] effort: high에서 low로 낮아진다", "[review] context_full: 바뀐 설정(6000에서 9000)"):
+            self.assertIn(line, diag)
 
     def test_먼저_쓴_테스트를_고치면_표에_적어야_하고_구현한_뒤에도_TESTFIRST를_다시_지난다(self):
         self.feature_to_test()
