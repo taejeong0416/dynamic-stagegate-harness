@@ -11,7 +11,7 @@
 | `start --kind <종류> --title "<제목>" [--with <선택>] [--from P001]` | 계획 파일을 만들고 첫 상태로 시작한다. `--with`는 종류의 options에 있는 선택 상태를 켠다 |
 | `next P001 [--review]` | 지금 상태의 조건을 검사하고, 통과하면 조건이 맞는 다음 상태로 옮긴다. 조건이 맞지 않는 상태는 건너뛰고 기록한다 |
 | `back P001 <상태> --why "..."` | 앞 상태로 돌아간다. 종류의 back에 지금 상태가 있으면 거기 적힌 상태로만 간다 |
-| `run P001 --eta HH:MM --basis "..."` | 실행 상태에서 예상 종료 시각과 근거를 적는다 |
+| `run P001 --eta HH:MM --basis "..."` | 실행 상태에서 예상 종료 시각과 근거를 적는다. 이때 이미 넘긴 상태의 절 기록을 고정한다 |
 | `abandon P001 --why "..."` | 계획을 그만둔다 |
 | `hold P001 --quote "..."` | 사용자가 이번 턴에 멈추라고 한 문장을 적는다. 그 문장이 든 턴에서는 stop hook이 이 계획으로 막지 않는다 |
 | `stage <n> --decision "..."` | stages가 있는 구조에서 프로젝트 단계를 바꾼다 |
@@ -36,9 +36,10 @@
 | 표 | 키 |
 |---|---|
 | `[kinds.<종류>]` | states(상태 순서), options(start --with로 켤 수 있는 선택), when(상태별 들를 조건), back(상태별로 돌아갈 수 있는 앞 상태), limit(이 종류로 진행할 수 있는 조건), extra_sections(상태가 쓰지 않아도 틀에 넣을 절) |
-| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델) |
+| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델), context(`{context}` 발췌에 담을 파일 목록) |
 | `[sections."<절>"]` | body(계획 틀에 들어갈 표나 bullet) |
-| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초) |
+| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000) |
+| `[remote]` | host, port, dir(학습 서버), exec_states(gate run 기록이 없어도 ssh로 저장소 코드를 그 자리에서 돌려도 되는 상태) |
 
 checks의 검사와 review_when에는 `only = [종류]`나 `skip = [종류]`를 붙여 적용할 종류를 고른다.
 
@@ -48,7 +49,9 @@ back은 `back = {TEST = ["IMPLEMENT", "PLAN"]}`처럼 떠나는 상태마다 돌
 
 limit은 when과 같은 조건 키를 쓴다. `limit = {max_files = 5}`인 종류의 계획이 코드 파일을 6개 적으면 pre-commit과 `next`가 막고, 그 계획은 abandon한 뒤 맞는 종류로 `start --from`해서 잇는다.
 
-unchanged 검사는 `next`가 상태를 넘길 때 남긴 절 내용 기록과 지금 계획 파일을 견준다. `{check = "unchanged", state = "SPEC"}`는 SPEC이 쓰는 절 전체를, `{check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"]}`는 그 bullet 항목만 본다. 바뀐 내용이 맞으면 back으로 그 상태에 돌아가 다시 넘긴다.
+unchanged 검사는 `next`가 상태를 넘길 때 남긴 절 내용 기록과 지금 계획 파일을 견준다. `{check = "unchanged", state = "SPEC"}`는 SPEC이 쓰는 절 전체를, `{check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"]}`는 그 bullet 항목만 본다. 바뀐 내용이 맞으면 back으로 그 상태에 돌아가 다시 넘긴다. 다만 `gate run`을 적었거나 실행 상태에서 결과 파일이 생긴 뒤에는 결과가 보이므로, 그때까지 넘긴 상태의 기록을 고정한다. back으로 다시 넘겨도 기준이 바뀌지 않아 결과를 본 뒤 판정 경계나 eval 케이스를 고쳐 통과할 수 없고, 새 기준이 필요하면 `start --from`으로 새 계획을 잇는다.
+
+code_unchanged 검사는 이 상태에 들어온 뒤 계획의 코드 파일에 커밋이나 커밋하지 않은 변경이 없는지 본다. 실행 상태에 붙이면 결과 파일이 앞에서 검사받은 코드에서 나왔는지 확인할 수 있고, 바뀌었으면 코드 상태로 돌아가 다시 지난 뒤 다시 실행한다.
 
 test_edits 검사는 `[project] tests` 패턴에 맞는 계획의 테스트 파일 가운데 state를 처음 넘긴 뒤 고치거나 지운 파일이 section 표의 첫 칸에 있는지 본다. state를 주지 않으면 계획을 시작한 뒤를 보고, 새로 더한 테스트 파일은 보지 않는다. 테스트가 틀렸으면 고치고 표에 이유를 쓰며, 기대값을 구현에 맞춰 바꾸지 않는다.
 
@@ -58,15 +61,21 @@ command 검사의 `use`는 `[project]`의 test나 affected를 가리키고, affe
 
 검토자는 사용자 설정, MCP 서버, skill을 읽지 않는 `claude -p` 호출이다. 사용자 설정의 추론 단계도 따르지 않아서 검토자의 추론 단계는 `[review] effort`로 정한다. 호출마다 횟수와 비용이 그 상태의 검토 기록에 쌓이고 `diagnose`의 검토 호출 표에 나온다.
 
-review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`를 쓸 수 있다. `{diff}`는 계획을 시작한 뒤의 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀌고, 코드가 바뀌면 계획 내용이 같아도 다시 검토한다.
+review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{context}`를 쓸 수 있다. `{diff}`는 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀐다. 처음에는 계획을 시작한 뒤의 diff 전체를 주고, 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 준다. 통과한 뒤 코드가 그대로면 다시 부르지 않고, 계획 내용이 바뀌면 diff 전체를 다시 본다.
+
+`{context}`는 상태의 context에 적은 파일에서 뽑은 발췌 파일의 경로로 바뀐다. context_full자 이하인 파일은 전문을 담고, 넘는 파일은 마크다운 제목과 제목마다 첫 줄, 계획 파일이 인용한 참조(cite 패턴과 계획 번호)가 든 줄, csv의 머리 행만 담는다. 결정 기록이나 실험 기록처럼 계속 커지는 문서를 검토자가 호출마다 통째로 읽지 않게 하기 위해서다. 지시문에는 발췌를 먼저 읽고 더 필요한 내용은 원본을 Grep으로 찾으라고 쓴다.
 
 ## 막는 장치
 
 | 장치 | 막는 경우 |
 |---|---|
-| guard (PreToolUse) | 코드 상태인 계획이 없는데 code 파일을 고칠 때. 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit)과 git hook을 직접 쓸 때. 상태를 gate 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때. hook을 우회할 때 |
-| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
+| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
+| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때. 그 파일을 적은 계획이 edit = "tests" 상태인데 테스트 파일이 아닐 때. 그 파일을 적은 계획이 종류의 limit을 벗어났을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |
 
-guard와 stop이 막은 기록과 `next`가 통과하지 못한 이유는 git 폴더의 gate-events.jsonl에 남아 `diagnose`가 쓴다. 마지막 구조 변경 뒤 끝난 계획이나 guard와 stop이 막은 횟수가 기준을 넘거나 프로젝트 단계가 바뀌면 SessionStart가 하네스 점검을 권한다.
+읽기 명령은 cd, cat, head, tail, ls, wc, grep, rg, cut, echo, du, stat, nl, Get-Content, Select-String과 git add, commit, diff, log, show, status, checkout, restore, blame, grep, ls-files, rev-parse, branch이고, 따옴표 밖의 &&, ||, ;, |로 이을 수 있으며 `2>/dev/null`, `2>&1`만 붙일 수 있다. 다른 리다이렉트, 명령 치환, 배경 실행이 있으면 읽기로 보지 않고, awk, sed, find, xargs는 파일을 쓰거나 명령을 돌릴 수 있어 읽기에서 뺀다.
+
+SessionStart는 진행 중인 계획과 할 일, status_file 절의 항목 머리를 6,000자 안으로 넣는다. hook 출력이 10,000자를 넘으면 Claude Code가 앞 2KB만 넣기 때문이다.
+
+guard와 stop이 막은 기록(guard는 명령 앞 200자 포함)과 `next`가 통과하지 못한 이유는 git 폴더의 gate-events.jsonl에 남아 `diagnose`가 쓴다. 마지막 구조 변경 뒤 끝난 계획이나 guard와 stop이 막은 횟수가 기준을 넘거나 프로젝트 단계가 바뀌면 SessionStart가 하네스 점검을 권한다.
