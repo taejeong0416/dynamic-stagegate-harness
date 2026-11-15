@@ -102,6 +102,11 @@ Python 3.11 이상과 git이 필요하다.
 - 이 세션이 고친 코드나 하네스 파일에 커밋하지 않은 변경이 있거나, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있으면 턴을 끝내지 못하게 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는 막지 않는다.
 - SessionStart hook이 진행 중인 계획과 할 일, 상태 문서 절의 항목 머리를 6,000자 안으로 넣고, 메시지마다 계획 목록이 한 줄씩 들어간다. hook 출력이 10,000자를 넘으면 Claude Code가 앞 2KB만 넣기 때문이다. 컨텍스트가 압축돼도 상태는 파일에 남아 있어서 다시 들어온다.
 - `gate describe --mermaid`가 지금 구조의 경로를 위와 같은 다이어그램으로 출력한다.
+- `back`은 되돌아가는 원인의 결함 분류를 받아 사고로 남기고, 통과한 뒤 드러난 결함은 `gate incident`로 남긴다. 막힌 기록에는 그 뒤 같은 행동이 구조를 바꾸지 않고 통과했는지에 따라 진짜 막힘, 오탐, 미판정 판정이 붙는다.
+- `gate diagnose`가 부품마다 막은 횟수, 판정, 잡으려던 분류의 사고, 검토 비용을 모아 성적으로 보이고, 잡는 부품이 없는 결함 분류에는 게이트 생성을, 오탐만 내는 부품에는 완화를 제안 초안으로 낸다.
+- 프로젝트에서 만든 게이트는 project 부품으로 들어간다. 부품 폴더의 `checks.py`가 새 검사를 더하고 `[[guard]]`가 막을 명령을 더하며, check-proposal은 끝난 계획에 그 검사를 다시 돌려 새로 막히는 계획을 보인다.
+- 닫힌 계획은 색인 파일에 한 줄씩 남고, 오래된 것은 state.json에서 state-archive.jsonl로 옮겨진다. 막힌 기록은 상한을 넘으면 성적 파일로 접힌다.
+- 현재 상태 문서에는 글자 수 상한이 있다. 상한을 넘거나 계획이 일정 수 닫히면 SessionStart가 정리를 권하고, 정리 경로(tidy)는 정리 전에 풀리던 참조와 항목 ID가 정리 뒤에도 남아 있어야 끝난다.
 
 ## 부품
 
@@ -117,6 +122,7 @@ Python 3.11 이상과 git이 필요하다.
 | value-evidence | 코드에 넣은 숫자 값마다 근거를 적게 한다 | 하는 일이 실험 |
 | sample-run | 긴 실행 전에 작은 표본으로 끝까지 돌려 보게 한다 | 실패하면 시간을 잃는다 |
 | experiment-diff-review | 실험 코드 diff를 계획과 견주는 검토 | 하는 일이 실험 |
+| cleanup | 기록 정리 경로 tidy(SURVEY, TIDY, CONFIRM) | 하는 일이 실험 |
 | feature | 기능 경로. feature(SPEC, PLAN, IMPLEMENT, TEST, RECORD)와 refactor | 하는 일이 서비스 코드 |
 | test-first | 구현 앞에 TESTFIRST를 넣어 실패하는 테스트를 먼저 쓰고 고정한다 | 하는 일이 서비스 코드이고 테스트 명령이 있다 |
 | diff-review | 확인 상태 뒤에 코드 diff를 검토하는 REVIEW를 넣는다 | 하는 일이 서비스 코드 |
@@ -134,9 +140,9 @@ Python 3.11 이상과 git이 필요하다.
 
 구조는 제안서로만 바꾼다. SessionStart hook은 마지막 구조 변경 뒤 끝난 계획 수나 hook이 막은 횟수가 기준을 넘으면 점검을 권한다.
 
-1. `gate diagnose`가 상태별로 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유, 검토 호출 수와 비용, 되돌아간 경로별 횟수를 모으고, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화도 모은다.
+1. `gate diagnose`가 상태별로 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유, 검토 호출 수와 비용, 되돌아간 경로별 횟수를 모으고, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화도 모은다. 사고 기록, 부품 성적, 제안 초안, 적용 조건이 바뀐 부품도 여기에 나온다.
 2. 에이전트가 `gate propose H###`로 지금 부품의 사본을 만들어 부품을 더하고 빼고 고친 뒤, 그 수치를 근거로 `.gate/proposals/H###.md`에 제안서를 쓴다. 상태나 검사를 더하는 변경은 근거 하나로 충분하고, 빼거나 약하게 하는 변경은 진단 수치가 있어야 한다.
-3. `gate check-proposal`이 사본을 조립해서 부품별 변경, lint, 새 구조에서 빠지거나 풀리는 검사와 상태와 설정([project], [review], [remote], [[stages]])의 목록, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
+3. `gate check-proposal`이 사본을 조립해서 부품별 변경, lint, 새 구조에서 빠지거나 풀리는 검사와 상태와 설정([project], [review], [remote], [[stages]])의 목록, 지난 계획 재생, 끝난 계획에 새 검사를 돌린 결과, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
 4. 사용자가 바꾸는 것과 근거를 보고 승인하면 `gate adopt`가 부품, local.toml, config.toml, parts.lock을 함께 바꾼다. guard hook은 승인 문장이 이번 턴 사용자 입력에 있는지 확인한다.
 
 앞 구조는 `.gate/history/`에 남고, 진행 중인 계획은 시작할 때의 구조 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 code 패턴, 변경 파일 절 이름, max_visits, stop_states, 검토 모델과 추론 단계도 그 버전을 따르고, 엔진이 바뀐 진행 중 계획은 status와 SessionStart가 알린다. 아래는 마이그레이션 단계와 작은 작업용 선택을 더한 뒤의 feature 경로 예시다.
@@ -223,6 +229,8 @@ plugins/dynamic-stagegate-harness/
     checks.py    넘어가는 조건 검사 함수와 검토자 호출
     evolve.py    lint, describe, diagnose, 제안서 검사, adopt
     parts.py     부품 조립, 적용 조건, parts.lock
+    records.py   닫힌 계획 보관, 계획 색인, 현재 상태 문서의 필드와 항목
+    score.py     사고 기록, 막힌 기록의 판정, 부품 성적, 제안 초안
     cli.py       gate 명령과 git hook 검사
     hooks.py     guard, stop, 주입 hook
   library/<부품>/part.toml            부품(종류, 상태, 절, 붙일 자리, 적용 조건)
@@ -235,7 +243,7 @@ tests/combos/                         실제로 돌아 본 조합의 기대 구�
 
 테스트는 저장소 루트에서 `python -X utf8 -m unittest discover tests`로 돌린다.
 
-설치한 프로젝트의 `.gate/`에는 parts/(쓰는 부품), local.toml(고정 질문의 답과 덮어쓰기), parts.lock(부품 버전과 해시), config.toml(조립한 지금 구조), history/(앞 구조 버전), library/(부품 라이브러리), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
+설치한 프로젝트의 `.gate/`에는 parts/(쓰는 부품), local.toml(고정 질문의 답과 덮어쓰기), parts.lock(부품 버전과 해시), config.toml(조립한 지금 구조), history/(앞 구조 버전), library/(부품 라이브러리), proposals/(제안서와 진단), state-archive.jsonl(보관한 닫힌 계획), scorecard.json(접어 둔 부품 성적), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
 
 엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 적용된다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다. 엔진의 앞 버전은 보관하지 않아서, 진행 중인 계획이 있으면 update가 경고한다.
 
@@ -245,7 +253,10 @@ tests/combos/                         실제로 돌아 본 조합의 기대 구�
 - 셸 명령 검사는 리다이렉트, tee, sed -i, cp, mv 같은 흔한 우회만 막고(읽기 명령은 따옴표 밖의 &&, ;, |로 이을 수 있다), 그 밖의 방법으로 쓴 코드는 커밋 시점의 pre-commit이 잡는다. 구조 파일을 Python 스크립트로 직접 쓰면 guard가 보지 못하고, commit-msg hook이 `harness:` 커밋으로 따로 남기게 할 뿐이다.
 - stop hook은 이 세션이 편집 도구로 고친 파일만 본다. 셸 명령이나 스크립트로 고친 파일은 pre-commit과 `clean` 검사가 잡는다.
 - 숫자 검사는 .py만 tokenize로 정확히 보고, 다른 언어는 문자열과 주석을 지운 뒤 정규식으로 본다.
-- 진단 수치는 판단 자료이고, 상태를 빼거나 더할지는 에이전트의 제안과 사용자 승인으로 정한다.
+- 진단 수치와 제안 초안은 판단 자료이고, 상태를 빼거나 더할지는 에이전트의 제안과 사용자 승인으로 정한다. 제안 기준값은 근거 없이 정한 값이다.
+- 막힌 기록의 판정은 같은 행동이 다시 통과했는지만 본다. 막힌 뒤 에이전트가 다른 방법으로 돌아간 경우는 미판정으로 남고, stop hook의 막힘에는 판정을 붙이지 않는다.
+- 검사 재생은 계획 파일만 보는 검사만 돌린다. git 기록, 명령 결과, 결과 파일을 보는 검사는 지난 계획에 다시 돌리지 못한다.
+- 라이브러리의 실험, 기능, 에이전트 경로는 같은 상태 이름을 다르게 정의해서 한 프로젝트에 함께 넣지 못한다.
 
 ## 라이선스
 

@@ -10,12 +10,14 @@
 |---|---|
 | `start --kind <종류> --title "<제목>" [--with <선택>] [--from P001]` | 계획 파일을 만들고 첫 상태로 시작한다. `--with`는 종류의 options에 있는 선택 상태를 켠다 |
 | `next P001 [--review]` | 지금 상태의 조건을 검사하고, 통과하면 조건이 맞는 다음 상태로 옮긴다. 조건이 맞지 않는 상태는 건너뛰고 기록한다 |
-| `back P001 <상태> --why "..."` | 앞 상태로 돌아간다. 종류의 back에 지금 상태가 있으면 거기 적힌 상태로만 간다 |
+| `back P001 <상태> --why "..." --defect <분류>` | 앞 상태로 돌아간다. 종류의 back에 지금 상태가 있으면 거기 적힌 상태로만 간다. 되돌아가는 원인의 분류(logic 코드 논리, data 데이터 형태나 누수, resource 시간과 메모리와 디스크, env 실행 환경, plan 계획이나 판정 기준)를 받아 사고로 남긴다 |
+| `incident --defect <분류> --note "..." [--plan P001] [--state <상태>] [--quote "..."]` | 통과한 뒤에 드러난 결함을 사고로 남긴다. 결과가 무효였거나 사용자가 결함을 지적했을 때 쓴다. `--quote`는 사용자가 이번 턴에 쓴 문장이어야 한다 |
 | `run P001 --eta HH:MM --basis "..."` | 실행 상태에서 예상 종료 시각과 근거를 적는다. 이때 이미 넘긴 상태의 절 기록을 고정한다 |
 | `abandon P001 --why "..."` | 계획을 그만둔다 |
 | `hold P001 --quote "..."` | 사용자가 이번 턴에 멈추라고 한 문장을 적는다. 그 문장이 든 턴에서는 stop hook이 이 계획으로 막지 않는다 |
 | `stage <n> --decision "..."` | stages가 있는 구조에서 프로젝트 단계를 바꾼다 |
 | `status` | 진행 중인 계획과 할 일을 출력한다 |
+| `records` | 현재 상태 문서, 보관 문서, 상태 파일의 크기와 정리를 권하는 이유를 출력한다 |
 
 명령은 모두 `python -X utf8 .gate/gate.py` 뒤에 붙인다.
 
@@ -23,9 +25,9 @@
 
 구조는 프로젝트가 자라면서 바뀐다. 새 폴더나 산출물이 생기면 새 상태나 경로가 필요하고, 형식만 채우고 지나가는 상태는 빼거나 조건을 붙인다. 구조는 아래 절차로만 바꾼다.
 
-1. `diagnose`로 상태별 기록, 상태별 검토 호출 수와 비용, 되돌아간 경로별 횟수와 이유, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화를 본다. 상태별 기록은 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유다.
+1. `diagnose`로 상태별 기록, 상태별 검토 호출 수와 비용, 되돌아간 경로별 횟수와 이유, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화, 부품 상태, 사고 기록, 부품 성적, 제안 초안, 기록 크기를 본다. 상태별 기록은 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유다.
 2. `propose H###`로 지금 부품(`.gate/parts`)과 `.gate/local.toml`의 사본을 `.gate/proposals/H###/`에 만들고, 그 사본에서 부품을 더하고 빼고 고친다. 라이브러리 부품은 `.gate/library/<이름>` 폴더를 사본의 parts 아래에 복사해서 더한다. `.gate/proposals/H###.md`에는 "바꾸는 것" 표에 항목마다 근거를 쓰고 "진행 중인 계획" 절에 영향을 쓴다. parts 폴더가 없는 프로젝트는 사본 대신 제안서의 "새 구조" 절에 새 config 전체를 toml 블록으로 넣고 version을 지금보다 1 크게 쓴다.
-3. `check-proposal H### --review`가 사본을 조립해서 부품별 변경(더함, 뺌, 고침), lint, 빼거나 푸는 변경 목록, 지난 계획 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 검토 뒤에 제안서나 사본이 바뀌면 다시 검토받아야 한다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
+3. `check-proposal H### --review`가 사본을 조립해서 부품별 변경(더함, 뺌, 고침), lint, 빼거나 푸는 변경 목록, 지난 계획 재생, 지난 계획 검사 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 검사 재생은 끝난 계획의 계획 파일에 새 구조의 검사를 다시 돌려서, 새로 막히는 계획과 더는 막히지 않는 계획을 보인다. 계획 파일만 보고 판정하는 검사(filled, table, covers, choice, refs, paths_exist)만 돌린다. 검토 뒤에 제안서나 사본이 바뀌면 다시 검토받아야 한다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
 4. 사용자에게 바꾸는 것과 근거를 보이고 승인을 받는다.
 5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. adopt는 parts 폴더, local.toml, config.toml, parts.lock을 사본의 것으로 바꾼다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 [project]의 계획 값(code, tests, files_section, max_visits, stop_states, test, affected, unreviewed), [review], [remote] exec_states도 계획 버전을 따른다. guard와 pre-commit처럼 여러 계획을 합치는 판단은 지금 구조나 진행 중인 계획의 버전 가운데 하나라도 코드로 보는 파일을 코드로 보고, 허용할 파일은 계획마다 자기 버전으로 뽑는다. 저장소에 하나뿐인 값(plans_dir, state_file, plan_prefix, harness, protected, tracked, pre_commit, status와 decisions 파일, 서버 주소)은 지금 구조를 따른다.
 
@@ -47,12 +49,65 @@
 | `[kinds]`, `[states]`, `[sections]` | 종류, 상태, 절의 정의. 상태의 roles에 역할(plan, implement, execute, verify, record, decide)을 적는다 |
 | `[[attach]]` | roles나 states로 고른 상태에 더하는 sections, todo, checks와 그 밖의 상태 키. at으로 순서를 정한다(기본 50, 상태 정의도 50) |
 | `[[insert]]` | state를 before나 after에 적은 역할의 앞이나 뒤에 넣는다. 뒤에 넣은 상태는 앞 상태의 back을 물려받는다 |
+| `[[guard]]` | pattern(정규식)에 맞는 셸 명령을 reason을 보이며 막는다 |
+| `[records]` | 기록 설정(아래 "기록") |
+| provenance | project 부품을 만든 계기(사고 번호, 날짜, 증거 경로) |
 
 attach와 insert의 only, skip은 종류 이름이다. 부품은 경로 부품(종류를 정하는 부품), library 부품, project 부품 순으로, 같은 묶음 안에서는 이름 순으로 쌓인다. 두 부품이 같은 종류, 상태, 절을 다르게 정의하면 조립 문제다.
 
 local.toml의 `[answers]`는 고정 질문의 답(work, run, ships, tests, failure_cost)이고 부품을 고르는 데만 쓴다. `[project]`, `[remote]`, `[review]`는 키 단위로, `[kinds]`, `[states]`, `[sections]`는 이름 아래 필드 단위로 조립 결과를 덮어쓴다.
 
 parts.lock에는 부품마다 버전, 출처, 파일 해시(hash), 라이브러리에서 복사할 때의 해시(from)가 있다. hash와 from이 같으면 프로젝트에서 고치지 않은 부품이다.
+
+부품 폴더에 `checks.py`를 두면 엔진이 읽어 검사를 더한다. 모듈은 `from gatekit.checks import check`로 받은 `@check`를 함수에 붙이고, 함수는 `(ctx, spec)`을 받아 빠진 항목 문장 목록을 돌려준다. 조립한 config.toml의 검사에는 `part = "<부품>"`이, review가 있는 상태에는 `review_part`가 붙는다. 막힌 기록과 검토 비용을 부품별로 모으는 데 쓴다.
+
+## 사고와 성적
+
+게이트는 사고에서 만든다. 사고는 `back --defect`와 `incident`로 상태 파일에 남고, 막힌 기록은 git 폴더의 gate-events.jsonl에 구조 버전, 엔진 해시, 막은 검사의 부품과 함께 남는다.
+
+막힌 기록에는 판정이 붙는다. 막힌 뒤 구조 버전과 엔진이 그대로인 채 같은 행동이 통과했으면 작업을 고쳐서 넘어간 것이라 진짜 막힘이다. 구조나 엔진이 바뀐 뒤에 통과했으면 하네스를 고쳐서 넘어간 것이라 오탐이다. 다시 통과한 기록이 없으면 미판정이다. `next`가 막은 기록은 그 계획이 같은 상태를 넘긴 기록과, guard가 막은 기록은 같은 파일 편집이나 같은 명령이 통과한 기록과 짝짓는다.
+
+`diagnose`의 "부품 성적" 표는 부품마다 막은 횟수, 진짜 막힘, 오탐, 미판정, covers에 해당하는 분류의 사고, 검토 호출 수와 비용을 보인다. 부품이 없는 guard와 stop의 막힘은 "엔진" 행에 모인다. "제안 초안"은 아래 기준으로 나온다. 기준값은 근거 없이 정한 값이고 `[project]`의 같은 이름 키로 바꾼다.
+
+| 초안 | 조건 | 기준 키(기본값) |
+|---|---|---|
+| 생성 | 같은 결함 분류의 사고가 서로 다른 계획에서 나왔는데 covers가 그 분류인 부품이 없다 | gate_new_plans(2) |
+| 강화 | 쓰는 부품의 covers에 해당하는 분류의 사고가 나왔다 | gate_leaks(1) |
+| 완화 | 최근 계획 동안 그 부품의 오탐이 기준 이상이고 진짜 막힘이 없다 | gate_relax_false(3), gate_relax_window(10) |
+| 올리기 | project 부품의 진짜 막힘이 기준 이상이다 | gate_promote_true(3) |
+
+초안은 판단 자료다. 생성 초안을 따를 때는 그 사고를 막는 검사를 project 부품으로 쓰고, check-proposal의 검사 재생에서 사고가 난 계획이 새로 막히는지 확인한다.
+
+## 기록
+
+기록이 쌓여도 한 번에 읽는 양이 늘지 않게 한다. `[records]`의 키는 아래와 같다.
+
+| 키 | 뜻 | 기본값 |
+|---|---|---|
+| current_max | 현재 상태 문서(`[project] status_file`)의 글자 수 상한 | 10000 |
+| archive_file | 현재 상태 문서에서 닫힌 항목을 옮기는 보관 문서 | 없음 |
+| index | 계획 색인 파일. 계획이 닫힐 때마다 엔진이 다시 쓴다 | 없음 |
+| index_items | 색인에 옮길 계획 파일 항목. "절: 항목" 꼴 | 없음 |
+| ledgers | 덧붙이기만 하는 기록(실험 기록, 결정 문서). 참조가 풀리는지 볼 때 쓴다 | 없음 |
+| item_id | 현재 상태 문서 항목의 고정 ID 정규식. 예: `\\[(S\\d{3})\\]` | 없음 |
+| keep_closed | state.json에 남겨 둘 닫힌 계획 수. 넘으면 오래된 것부터 state-archive.jsonl로 옮긴다 | 10 |
+| events_keep | 막힌 기록에 남겨 둘 줄 수. 넘으면 diagnose가 오래된 줄을 scorecard.json으로 접는다 | 500 |
+| cleanup_every | 마지막 정리 뒤 이만큼 계획이 닫히면 정리를 권한다 | 10 |
+
+계획 파일은 닫혀도 자리를 바꾸지 않고, 색인에 계획마다 한 줄(번호, 제목, 종류, 결과, 닫은 날, index_items의 값)이 남는다. 보관 파일로 옮긴 계획도 `start --from`, `diagnose`, 재생에서 그대로 쓰인다. state-archive.jsonl과 scorecard.json은 gate 명령만 쓴다.
+
+검사가 읽어야 하는 사실은 현재 상태 문서 머리의 필드에 둔다. 문서 첫 줄을 `---`로 시작하고 다음 `---`까지 `이름: 값` 줄을 쓴다. SessionStart는 이 필드를 한 줄로 넣는다.
+
+| 검사 | 통과 조건 |
+|---|---|
+| doc_size | 현재 상태 문서(path로 다른 문서)가 current_max(max로 다른 값) 글자 안이다 |
+| field | 문서 머리의 field에 값이 있다. `after_last = {file, pattern}`을 주면 그 값의 번호가 file에서 pattern에 맞는 가장 큰 번호의 다음이다 |
+| survey | 정리 전의 문서 크기, 항목 ID, 풀리는 참조를 계획 기록에 남긴다 |
+| kept | survey 때 풀리던 참조가 지금도 풀리고, 그때 있던 항목 ID가 현재 상태 문서나 보관 문서에 있다 |
+
+참조는 현재 상태 문서와 보관 문서가 인용한 계획 번호와 `[review] cite` 패턴이다. 계획 번호는 계획 기록이나 계획 파일이 있으면, 그 밖의 참조는 ledgers 문서에 있으면 풀린다.
+
+현재 상태 문서가 상한을 넘거나 마지막 정리 뒤 닫힌 계획이 cleanup_every개가 되면 SessionStart가 기록 정리를 권한다. 정리 경로 부품(cleanup)의 tidy 종류는 SURVEY에서 정리 전 상태를 재고, TIDY에서 닫힌 항목을 보관 문서로 옮기고, CONFIRM에서 kept와 doc_size로 확인한다. 종류에 `any_stage = true`를 두면 프로젝트 단계와 관계없이 시작할 수 있다.
 
 ## 구조 파일 형식
 
@@ -92,7 +147,7 @@ review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{con
 
 | 장치 | 막는 경우 |
 |---|---|
-| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
+| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이나 incident의 --quote 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). 부품의 `[[guard]]` pattern에 맞는 명령일 때. hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
 | stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때. 그 파일을 적은 계획이 edit = "tests" 상태인데 테스트 파일이 아닐 때. 그 파일을 적은 계획이 종류의 limit을 벗어났을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |
@@ -101,4 +156,4 @@ review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{con
 
 SessionStart는 진행 중인 계획과 할 일, status_file 절의 항목 머리를 6,000자 안으로 넣는다. hook 출력이 10,000자를 넘으면 Claude Code가 앞 2KB만 넣기 때문이다.
 
-guard와 stop이 막은 기록(guard는 명령 앞 200자 포함)과 `next`가 통과하지 못한 이유는 git 폴더의 gate-events.jsonl에 남아 `diagnose`가 쓴다. 마지막 구조 변경 뒤 끝난 계획이나 guard와 stop이 막은 횟수가 기준을 넘거나 프로젝트 단계가 바뀌면 SessionStart가 하네스 점검을 권한다.
+guard와 stop이 막은 기록(guard는 명령 앞 200자 포함), `next`가 통과하지 못한 이유, 막혔던 행동이 통과한 기록은 git 폴더의 gate-events.jsonl에 남아 `diagnose`가 쓴다. 마지막 구조 변경 뒤 끝난 계획이나 guard와 stop이 막은 횟수가 기준을 넘거나 프로젝트 단계가 바뀌면 SessionStart가 하네스 점검을 권한다.

@@ -19,7 +19,8 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 
 - 다음 상태로는 `python -X utf8 .gate/gate.py next P###`로만 넘어간다. 실패하면 빠진 항목이 나오므로 그것을 채운다.
 - 검토가 필요한 상태(config.toml에 review가 있는 상태)에서는 사용자에게 묻지 않고 `next P### --review`를 붙인다.
-- 조건을 못 채우면 `back P### <상태> --why "..."`로 돌아간다. 돌아갈 수 있는 상태는 `describe`에 나온다. 넘긴 상태의 절이 바뀌었다고 막히면, 잘못 고친 것은 되돌리고 고쳐야 맞는 것은 그 상태로 돌아가 다시 넘긴다. 같은 상태에 max_visits번 들어오면 멈추고 사용자에게 방향을 묻는다.
+- 조건을 못 채우면 `back P### <상태> --why "..." --defect <분류>`로 돌아간다. 분류는 되돌아가는 원인이고 logic(코드 논리), data(데이터 형태나 누수), resource(시간, 메모리, 디스크), env(실행 환경), plan(계획이나 판정 기준) 중 하나다. 돌아갈 수 있는 상태는 `describe`에 나온다.
+- 통과한 뒤에 결함이 드러나면 `incident --defect <분류> --plan P### --state <드러난 상태> --note "..."`로 남긴다. 실행 결과가 무효였거나 사용자가 결함을 지적했을 때다. 사용자가 지적했으면 그 문장을 `--quote`에 그대로 넣는다. 넘긴 상태의 절이 바뀌었다고 막히면, 잘못 고친 것은 되돌리고 고쳐야 맞는 것은 그 상태로 돌아가 다시 넘긴다. 같은 상태에 max_visits번 들어오면 멈추고 사용자에게 방향을 묻는다.
 - 실행 상태(run = true)에서 오래 걸리는 작업을 띄우기 전에 `run P### --eta HH:MM --basis "<근거>"`를 적고, 답에 남은 시간과 끝나는 시각을 쓴다. 실행을 적거나 결과 파일이 생긴 뒤에는 앞에서 넘긴 절(판정 경계, eval 케이스)이 고정되어 back으로 다시 넘겨도 바뀌지 않는다. 새 기준이 필요하면 `start --from P###`로 새 계획을 잇는다.
 - 실행 상태에 들어간 뒤 계획의 코드를 고치면 결과가 검사받은 코드에서 나왔다고 볼 수 없어 막힌다. 코드 상태로 back해 다시 지난 뒤 다시 실행한다.
 - 사용자가 이번 턴에 멈추라고 하면 그 문장을 `hold P### --quote "<문장>"`으로 적는다. 스스로 멈추려고 쓰지 않는다.
@@ -36,6 +37,8 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 - 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 사용자 승인을 받는다. config.toml, parts, local.toml, parts.lock, history, gatekit은 guard가 직접 편집을 막는다.
 - 하네스 파일(.gate/gatekit, config.toml, parts, local.toml, parts.lock, history, library, GATE.md, .githooks)을 바꾸는 커밋은 다른 파일과 섞지 않고 `harness:`로 시작한다.
 - SessionStart가 하네스 점검을 권하면 사용자에게 한 번 묻고, 하기로 하면 evolve skill을 쓴다.
+- SessionStart가 기록 정리를 권하면 사용자에게 한 번 묻고, 하기로 하면 `start --kind tidy`로 정리 계획을 시작한다. 닫힌 항목은 지우지 않고 보관 문서로 옮기며, 실험 기록과 결정 문서의 행은 지우지 않는다.
+- 계획이 닫히면 계획 색인과 state-archive.jsonl이 바뀔 수 있다. 출력에 나오면 상태 파일과 함께 커밋한다.
 
 ## 보고
 
