@@ -30,6 +30,8 @@ archive_file = "progress/history.md"
 index = "experiments/plans/INDEX.md"
 index_items = ["기록: log.csv 행", "결정: 고른 갈래"]
 ledgers = ["experiments/log.csv", "progress/decisions.md"]
+supersedes = "^- 대체하는 결정:"
+superseded = "^- 대체됨:"
 
 [[stages]]
 n = 0
@@ -190,7 +192,7 @@ checks = [
 sections = ["정리"]
 todo = [
   "닫힌 항목을 현재 상태 문서에서 보관 문서([records] archive_file)로 옮긴다. 문장을 고치지 않고 그대로 옮긴다.",
-  "바뀐 결정이 있으면 결정 문서의 옛 항목에 대체한 항목의 제목을 적는다. 실험 기록과 결정 문서의 행은 지우지 않는다.",
+  "바뀐 결정이 있으면 새 항목의 대체 줄([records] supersedes)에 옛 항목 제목을 따옴표로 적거나, 옛 항목에 대체 표시 줄([records] superseded)을 적는다. 검토 발췌는 대체된 항목을 제목만 남긴다. 실험 기록과 결정 문서의 행은 지우지 않는다.",
   "\"정리\" 절에 옮긴 항목과 대체 표시를 붙인 결정을 쓰고 커밋한다.",
 ]
 checks = [

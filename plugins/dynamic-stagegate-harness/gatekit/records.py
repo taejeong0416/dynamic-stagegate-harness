@@ -19,6 +19,9 @@ DEFAULTS = {
     "keep_closed": 10,      # state.json에 남겨 둘 닫힌 계획 수. 근거 없이 정한 값
     "events_keep": 500,     # 막힌 기록에 남겨 둘 줄 수. 넘으면 성적으로 접는다. 근거 없이 정한 값
     "cleanup_every": 10,    # 마지막 정리 뒤 이만큼 계획이 닫히면 정리를 권한다. 근거 없이 정한 값
+    "supersedes": "",       # 원장의 새 항목이 옛 항목을 가리키는 줄의 정규식(그 줄의 따옴표 속 문구가 든 앞 제목이 대체된다)
+    "superseded": "",       # 원장의 옛 항목이 스스로 대체됐다고 적는 줄의 정규식
+    "context_recent": 30,   # 검토 발췌에 첫 줄까지 넣는 최근 제목 수. 0이면 모두. 근거 없이 정한 값
 }
 REC = DEFAULTS | CFG.get("records", {})
 

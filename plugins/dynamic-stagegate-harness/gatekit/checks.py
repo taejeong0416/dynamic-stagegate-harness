@@ -410,9 +410,32 @@ def plan_diff(ctx, base=None):
 CITE_DEFAULT = r"\b[A-Z]+\d{3}\b"  # 계획 번호(P001)와 같은 꼴의 참조
 
 
+def superseded_heads(lines, heads, rec):
+    """원장 문서에서 대체된 제목 줄 번호 → 대체한 항목. [records] supersedes는 새 항목 안에서 옛 항목을 가리키는 줄의
+    정규식이고(그 줄의 따옴표 속 문구가 든 앞쪽 제목이 대체된다), superseded는 옛 항목이 스스로 대체됐다고 적는 줄의 정규식이다"""
+    out = {}
+    if not (rec.get("supersedes") or rec.get("superseded")):
+        return out
+    bounds = heads + [len(lines)]
+    for k, h in enumerate(heads):
+        title = lines[h].lstrip("#").strip()
+        for line in lines[h + 1:bounds[k + 1]]:
+            if rec.get("superseded") and re.search(rec["superseded"], line):
+                out.setdefault(h, []).append(line.strip()[:80])
+            if rec.get("supersedes") and re.search(rec["supersedes"], line):
+                for ref in re.findall(r"\"([^\"]+)\"", line):
+                    for h2 in heads[:k]:
+                        if ref.strip() and ref.strip() in lines[h2]:
+                            out.setdefault(h2, []).append(title[:60])
+    return out
+
+
 def context_file(ctx, st):
-    """검토자가 먼저 읽을 발췌. 상태의 context에 적은 파일마다, context_full자 이하면 전문, 넘으면 마크다운 제목과
-    제목마다 첫 줄, 계획 파일이 인용한 참조([review] cite 패턴과 계획 번호)가 든 줄, csv면 머리 행을 담는다"""
+    """검토자가 먼저 읽을 발췌. 상태의 context에 적은 파일마다, context_full자 이하면 전문을 담는다. 넘으면 csv 머리 행,
+    계획 파일이 인용한 참조([review] cite 패턴과 계획 번호)가 든 줄, 최근 [records] context_recent개 제목과 제목마다 첫 줄을
+    담고, 원장의 대체된 항목은 제목과 대체한 항목만 담는다. 기록이 쌓여도 발췌는 인용한 양만큼만 커진다"""
+    from .records import DEFAULTS
+    rec = DEFAULTS | ctx["cfg"].get("records", {})
     text = ctx["text"]
     pats = ctx["cfg"]["review"].get("cite", [CITE_DEFAULT])
     cited = {ctx["pid"]} | {x for pat in pats for x in re.findall(pat, text)}
@@ -427,16 +450,28 @@ def context_file(ctx, st):
         if sum(len(l) + 1 for l in lines) <= ctx["cfg"]["review"].get("context_full", 6000):
             out += [f"## {rel} (전문)", ""] + lines + [""]
             continue
-        keep, after_head = [], False
+        heads = [i for i, l in enumerate(lines) if l.startswith("#")]
+        sup = superseded_heads(lines, heads, rec) if rel in rec["ledgers"] else {}
+        n = rec["context_recent"]
+        recent = set(heads[-n:]) if n else set(heads)
+        keep, after_head, skipped = [], False, 0
         for i, line in enumerate(lines):
             hit = any(re.search(rf"(?<![\w]){re.escape(c)}(?![\w])", line) for c in cited)
-            if (rel.endswith(".csv") and i == 0) or line.startswith("#") or hit:
+            head = line.startswith("#")
+            if head and i in sup:
+                keep.append(line[:400] + f" (대체됨: {'; '.join(sup[i])}. 남은 내용은 원본에서 Grep)")
+                after_head = False
+            elif (rel.endswith(".csv") and i == 0) or hit or (head and (i in recent or line.startswith("# "))):
                 keep.append(line[:400])
-                after_head = line.startswith("#")
+                after_head = head
+            elif head:
+                skipped += 1
+                after_head = False
             elif after_head and line.strip():
                 keep.append(line[:200])
                 after_head = False
-        out += [f"## {rel} (발췌: 제목과 제목마다 첫 줄, 인용한 참조가 든 줄)", ""] + keep + [""]
+        note = f", 인용되지 않은 앞 제목 {skipped}개는 뺐다" if skipped else ""
+        out += [f"## {rel} (발췌: 인용한 참조가 든 줄, 최근 제목과 제목마다 첫 줄{note}. 나머지는 원본에서 Grep)", ""] + keep + [""]
     f = git_path(f"gate-review/{ctx['pid']}-{ctx['state']}-context.md")
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("\n".join(out), encoding="utf-8")

@@ -30,6 +30,8 @@ archive_file = "progress/history.md"
 index = "experiments/plans/INDEX.md"
 index_items = ["기록: log.csv 행", "결정: 고른 갈래"]
 ledgers = ["experiments/log.csv", "progress/decisions.md"]
+supersedes = "^- 대체하는 결정:"
+superseded = "^- 대체됨:"
 
 [kinds.new]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]

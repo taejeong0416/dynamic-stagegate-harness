@@ -810,6 +810,32 @@ class FeatureTest(Repo):
             self.assertIn(want, ctx)
         self.assertNotIn("채움 줄 5 ", ctx)
 
+    def test_발췌는_대체된_원장_항목을_제목만_남기고_오래된_제목을_뺀다(self):
+        self.edit(".gate/config.toml",
+                  ("[states.SPEC]\n", '[states.SPEC]\ncontext = ["docs/decisions.md"]\n'),
+                  ("{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다.",
+                   "{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다. 먼저 발췌 {context}를 읽는다."))
+        cfg = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        rec = ('ledgers = ["docs/decisions.md"]\nsupersedes = "^- 대체하는 결정:"\nsuperseded = "^- 대체됨:"\n'
+               'context_recent = 3\n')
+        cfg = cfg.replace("[records]\n", "[records]\n" + rec, 1) if "[records]\n" in cfg else cfg + "\n[records]\n" + rec
+        self.write(".gate/config.toml", cfg)
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: context").returncode, 0)
+        filler = "x" * 7000
+        entries = [f"## 2026-01-0{i} 결정 {i}\n\n- 결정: 결정 {i}의 결정 줄이다.\n" for i in range(1, 7)]
+        entries[4] += '- 대체하는 결정: 2026-01-01 "결정 1"의 순서.\n'
+        entries[2] += "- 대체됨: 2026-01-06 결정 6\n"
+        self.write("docs/decisions.md", "# 결정\n\n" + "\n".join(entries) + f"\n<!-- {filler} -->\n")
+        self.feature_to_test()
+        ctx = (self.root / ".git" / "gate-review" / "P001-SPEC-context.md").read_text(encoding="utf-8")
+        self.assertIn("## 2026-01-01 결정 1 (대체됨: 2026-01-05 결정 5", ctx)
+        self.assertIn("## 2026-01-03 결정 3 (대체됨: - 대체됨: 2026-01-06 결정 6", ctx)
+        self.assertNotIn("결정 1의 결정 줄", ctx)
+        self.assertNotIn("2026-01-02 결정 2", ctx)  # 인용되지 않았고 최근 제목 3개 밖이다
+        self.assertIn("결정 6의 결정 줄", ctx)
+        self.assertIn("인용되지 않은 앞 제목", ctx)
+
     def test_검토자는_상태별_모델과_추론_단계로_부르고_다시_검토한_비용을_쌓는다(self):
         self.feature_to_test()
         spec = next(c["args"] for c in self.calls() if "'요구사항', '수용 기준', '범위 밖' 절을 검토한다" in c["prompt"])
