@@ -1,11 +1,13 @@
 """프로젝트에 stagegate 하네스를 설치하거나 엔진을 갱신한다.
 
-python -X utf8 install.py <preset> [--target 프로젝트 폴더]   새로 설치(preset: ml, agent, service)
-python -X utf8 install.py --update [--target 프로젝트 폴더]   엔진(.gate/gatekit)과 git hook만 다시 복사
+python -X utf8 install.py --answer work=service --answer tests=yes [--local 파일] [--dry-run] [--target 프로젝트 폴더]
+python -X utf8 install.py --update [--target 프로젝트 폴더]   엔진(.gate/gatekit), 라이브러리, git hook만 다시 복사
 
-설치는 엔진, preset의 config.toml, GATE.md, 블록 라이브러리(모든 preset의 config, .gate/library/), git hook을 복사하고
-core.hooksPath를 .githooks로 맞춘다. 이미 있는 config.toml은 덮어쓰지 않는다. 갱신은 엔진, GATE.md, 라이브러리,
-git hook만 바꾼다. 커밋은 하지 않는다.
+설치는 고정 질문의 답과 저장소의 사실로 라이브러리 부품의 적용 조건(applies_when)을 판정하고, 조건이 맞은 부품을
+.gate/parts/에 복사해 .gate/config.toml로 조립한다. 답과 덮어쓰기는 .gate/local.toml에, 부품의 버전과 해시는
+.gate/parts.lock에 남는다. --local은 [answers]와 덮어쓰기 표([project] code 같은)를 미리 적은 파일이다.
+--dry-run은 고른 부품과 뺀 부품만 보이고 아무것도 쓰지 않는다. 이미 있는 config.toml은 덮어쓰지 않는다.
+갱신은 엔진, GATE.md, 라이브러리, git hook만 바꾼다. 커밋은 하지 않는다.
 """
 import argparse
 import json
@@ -18,7 +20,10 @@ import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
-PRESETS = HERE / "presets"
+sys.path.insert(0, str(HERE))
+from gatekit import parts as PT  # noqa: E402
+
+LIBRARY = HERE / "library"
 SHIM = '''"""gate 명령 진입점. 프로젝트 루트에서 python -X utf8 .gate/gate.py <명령>"""
 import sys
 from pathlib import Path
@@ -35,6 +40,8 @@ GITHOOKS = {
                   "cd \"$(git rev-parse --show-toplevel)\" || exit 1\npython -X utf8 .gate/gate.py git-commit-msg \"$1\"\n",
 }
 MARK = "# stagegate 하네스:"
+LOCAL_HEAD = ("# 이 프로젝트의 입력. [answers]는 부품을 고르는 고정 질문의 답이고, 나머지 표는 조립 결과를 덮어쓴다"
+              "(예: [project] code).\n# 제안서와 gate adopt로만 바꾼다(.gate/GATE.md).\n")
 
 
 def copy_engine(gate_dir):
@@ -44,11 +51,10 @@ def copy_engine(gate_dir):
     shutil.copytree(HERE / "gatekit", dst, ignore=shutil.ignore_patterns("__pycache__"))
     (gate_dir / "gate.py").write_text(SHIM, encoding="utf-8")
     shutil.copy2(HERE / "GATE.md", gate_dir / "GATE.md")
-    lib = gate_dir / "library"  # 구조를 짤 때 빌려 쓸 상태와 절의 모음
-    lib.mkdir(exist_ok=True)
-    for p in PRESETS.iterdir():
-        if (p / "config.toml").exists():
-            shutil.copy2(p / "config.toml", lib / f"{p.name}.toml")
+    lib = gate_dir / "library"  # 부품 라이브러리. 구조를 바꿀 때 여기서 부품을 가져온다
+    if lib.exists():
+        shutil.rmtree(lib)
+    shutil.copytree(LIBRARY, lib)
 
 
 def engine_hash(d):
@@ -91,18 +97,28 @@ def write_githooks(target):
     subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=target, check=True)
 
 
-def copy_new(src, dst):
-    if dst.exists():
-        print(f"  그대로 둠: {dst}")
-        return
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    (shutil.copytree if src.is_dir() else shutil.copy2)(src, dst)
-    print(f"  복사: {dst}")
+def read_inputs(a):
+    """(덮어쓰기, 답). --local 파일에 --answer를 더한다. 답의 쉼표는 여러 답이다"""
+    local = tomllib.loads(Path(a.local).read_text(encoding="utf-8")) if a.local else {}
+    answers = dict(local.pop("answers", {}))
+    for item in a.answer:
+        key, _, val = item.partition("=")
+        if not val:
+            sys.exit(f"--answer는 질문=답으로 쓴다(지금 {item})")
+        answers[key.strip()] = val.split(",") if "," in val else val
+    return local, answers
+
+
+def local_text(local, answers):
+    out = LOCAL_HEAD + "\n[answers]\n" + "".join(PT._line(k, v) + "\n" for k, v in answers.items())
+    return out + ("\n" + PT.dumps(local) if local else "")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("preset", nargs="?")
+    ap.add_argument("--answer", action="append", default=[])
+    ap.add_argument("--local")
+    ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--target", default=".")
     ap.add_argument("--update", action="store_true")
     a = ap.parse_args()
@@ -118,7 +134,7 @@ def main():
     gate_dir = target / ".gate"
     if a.update:
         if not (gate_dir / "config.toml").exists():
-            sys.exit("설치된 하네스가 없다. preset 이름을 주고 새로 설치한다")
+            sys.exit("설치된 하네스가 없다. --answer로 답을 주고 새로 설치한다")
         before = engine_hash(gate_dir / "gatekit")
         copy_engine(gate_dir)
         write_githooks(target)
@@ -128,14 +144,34 @@ def main():
                   "status와 SessionStart가 '엔진 바뀜'으로 알린다. 가능하면 이 계획들을 끝낸 뒤 갱신한다.")
         print("엔진, GATE.md, 라이브러리, git hook을 갱신했다. 하네스 커밋으로 남긴다: "
               "git add .gate/gatekit .gate/gate.py .gate/GATE.md .gate/library .githooks, git commit -m \"harness: gatekit 갱신\"")
+        if (gate_dir / "parts").exists():
+            print("라이브러리에서 바뀐 부품은 python -X utf8 .gate/gate.py parts로 본다.")
         return
-    names = sorted(p.name for p in PRESETS.iterdir() if p.is_dir())
-    if a.preset not in names:
-        sys.exit(f"preset은 {', '.join(names)} 중 하나다")
-    src = PRESETS / a.preset
+    local, answers = read_inputs(a)
+    on, off = PT.select(PT.load_parts(LIBRARY), target, answers)
+    print("조건이 맞은 부품")
+    for p in on:
+        print(f"  {p['name']}: {p.get('description', '')} [{PT.fmt_cond(p['applies_when'])}]")
+    print("뺀 부품")
+    for p in off:
+        print(f"  {p['name']}: {p.get('description', '')} [{PT.fmt_cond(p.get('applies_when', {})) or '조건 없음'}]")
+    if not on:
+        sys.exit("조건이 맞은 부품이 없다. --answer work=service처럼 고정 질문의 답을 준다(질문 목록은 setup skill에 있다)")
+    cfg, bad = PT.assemble(on, local)
+    if bad:
+        sys.exit("이 부품들은 함께 조립되지 않는다.\n" + "\n".join(f"  {b}" for b in bad))
+    if a.dry_run:
+        return
     gate_dir.mkdir(exist_ok=True)
     copy_engine(gate_dir)
-    copy_new(src / "config.toml", gate_dir / "config.toml")
+    if (gate_dir / "config.toml").exists():
+        print(f"  그대로 둠: {gate_dir / 'config.toml'}")
+    else:
+        for p in on:
+            shutil.copytree(LIBRARY / p["name"], gate_dir / "parts" / p["name"])
+        (gate_dir / "local.toml").write_text(local_text(local, answers), encoding="utf-8")
+        (gate_dir / "config.toml").write_text(PT.dumps(cfg, PT.HEAD), encoding="utf-8")
+        PT.write_lock(gate_dir, PT.load_parts(gate_dir / "parts"))
     cfg = tomllib.loads((gate_dir / "config.toml").read_text(encoding="utf-8"))
     proj = cfg.get("project", {})
     state = target / proj.get("state_file", ".gate/state.json")
@@ -143,18 +179,17 @@ def main():
         stages = cfg.get("stages", [])
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=target, capture_output=True,
                               text=True).stdout.strip()
-        harness = {"version": cfg.get("version", 1), "adopted": f"설치({a.preset})", "at": time.strftime("%Y-%m-%dT%H:%M"),
+        harness = {"version": cfg.get("version", 1), "adopted": "설치", "at": time.strftime("%Y-%m-%dT%H:%M"),
                    "ts": time.time(), "commit": head, "stage": stages[0]["n"] if stages else None}
         state.write_text(json.dumps({"stage": harness["stage"], "plans": {}, "harness": harness}, ensure_ascii=False,
                                     indent=2) + "\n", encoding="utf-8")
     (target / proj.get("plans_dir", "plans")).mkdir(parents=True, exist_ok=True)
     write_githooks(target)
-    print(f"\n{a.preset} preset을 설치했다. 다음 순서로 마무리한다.")
-    print("  1. .gate/config.toml의 [project] code, tracked 패턴을 이 프로젝트 폴더에 맞춘다")
-    print("  2. 하네스 파일만 커밋한다: git add .gate .githooks, git reset .gate/state.json, "
+    print("\n하네스를 설치했다. 다음 순서로 마무리한다.")
+    print("  1. 하네스 파일만 커밋한다: git add .gate .githooks, git reset .gate/state.json, "
           "git commit -m \"harness: stagegate 하네스 설치\"")
-    print("  3. 상태 파일을 따로 커밋한다: git add .gate/state.json, git commit -m \"chore: gate 상태 파일\"")
-    print("  4. python -X utf8 .gate/gate.py describe로 구조를 보고, setup skill의 인터뷰로 PROFILE.md와 첫 조정을 한다")
+    print("  2. 상태 파일을 따로 커밋한다: git add .gate/state.json, git commit -m \"chore: gate 상태 파일\"")
+    print("  3. python -X utf8 .gate/gate.py describe로 구조를 보고, setup skill의 인터뷰로 PROFILE.md와 첫 조정을 한다")
 
 
 if __name__ == "__main__":

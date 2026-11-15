@@ -1,0 +1,79 @@
+name = "bugfix"
+description = "결함 경로(bugfix). 재현, 수정, 확인으로 간다"
+version = 1
+origin = "library"
+applies_when = {any = [{answer = {work = "service"}}, {answer = {work = "agent"}}]}
+
+[project]
+unreviewed = ["테스트 수정", "원인", "검증"]
+
+[kinds.bugfix]
+states = ["REPRO", "FIX", "VERIFY", "RECORD"]
+back = {VERIFY = ["FIX", "REPRO"]}
+
+[sections."재현"]
+body = """
+- 증상:
+- 재현 명령:
+"""
+
+[sections."변경 파일"]
+body = """
+| 파일 | 바꿀 내용 |
+|---|---|
+"""
+
+[sections."원인"]
+
+[sections."테스트 수정"]
+body = """
+| 파일 | 고친 이유 |
+|---|---|
+"""
+
+[sections."검증"]
+body = """
+- 테스트 명령:
+- 결과:
+"""
+
+[states.REPRO]
+code = true
+edit = "tests"
+sections = ["재현", "변경 파일"]
+todo = [
+  "\"재현\" 절에 증상과 재현 명령을 쓴다. 재현 명령은 지금 실패해야 한다.",
+  "실패를 재현하는 테스트나 eval 케이스를 쓰고 \"변경 파일\" 표에 넣은 뒤 커밋한다.",
+]
+checks = [
+  {check = "filled", section = "재현", items = ["증상", "재현 명령"]},
+  {check = "clean"},
+  {check = "command", section = "재현", item = "재현 명령", expect = "fail"},
+]
+
+[states.FIX]
+roles = ["implement"]
+code = true
+sections = ["원인", "테스트 수정"]
+todo = [
+  "\"원인\" 절에 원인과 고친 위치를 쓴다.",
+  "코드 작성은 Agent 도구에 model \"sonnet\"과 effort \"high\"를 주고 계획 파일 경로와 재현 명령을 넘겨 서브에이전트에 맡긴다. 몇 줄만 고치면 직접 쓴다. 돌아온 변경을 확인한다.",
+  "고치고 커밋한다. 재현 명령이 통과해야 넘어간다. REPRO에서 쓴 테스트나 케이스를 고치면 \"테스트 수정\" 표에 파일과 이유를 쓴다.",
+]
+checks = [
+  {check = "filled", section = "원인"},
+  {check = "clean"},
+  {check = "files_changed", any = true},
+  {check = "test_edits", state = "REPRO", section = "테스트 수정"},
+  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
+  {check = "command", section = "재현", item = "재현 명령"},
+]
+
+[states.VERIFY]
+roles = ["verify"]
+sections = ["검증"]
+todo = ["전체 테스트나 eval 명령([project] test, 비었으면 \"검증\" 절의 테스트 명령)을 돌리고 결과를 쓴다."]
+checks = [
+  {check = "filled", section = "검증", items = ["결과"]},
+  {check = "command", use = "test", section = "검증", item = "테스트 명령"},
+]

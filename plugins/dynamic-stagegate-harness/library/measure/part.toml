@@ -1,0 +1,55 @@
+name = "measure"
+description = "측정 경로(eda). 질문을 정하고 측정 코드를 돌려 기록한다"
+version = 1
+origin = "library"
+requires = ["experiment", "value-evidence"]
+applies_when = {answer = {work = "experiment"}}
+
+[remote]
+exec_states = ["MEASURE"]
+
+[kinds.eda]
+states = ["QUESTION", "MEASURE", "RECORD", "REPLAN"]
+
+[sections."질문"]
+body = """
+- 질문:
+- 바뀌는 결정:
+- 측정 방법:
+"""
+
+[states.QUESTION]
+sections = ["질문", "결과별 다음 행동", "행 조건 대조표"]
+todo = [
+  "\"질문\" 절에 질문, 결과로 바뀌는 결정, 측정 방법을 쓴다.",
+  "\"결과별 다음 행동\"을 두 갈래 이상 쓴다.",
+  "측정 코드 파일을 \"행 조건 대조표\"에 쓴다.",
+]
+checks = [
+  {check = "filled", section = "질문", items = ["질문", "바뀌는 결정", "측정 방법"]},
+  {check = "table", section = "결과별 다음 행동", min_rows = 2},
+  {check = "files_listed"},
+]
+
+[states.MEASURE]
+roles = ["measure"]
+code = true
+todo = ["측정 코드를 커밋하고 돌린다."]
+checks = [
+  {check = "clean"},
+]
+
+[[attach]]
+states = ["MEASURE"]
+at = 65
+sections = ["실행 계획"]
+todo = ["결과 파일 경로를 \"실행 계획\"에 쓴다."]
+checks = [
+  {check = "results", section = "실행 계획", item = "결과 파일"},
+]
+
+[[attach]]
+states = ["REPLAN"]
+checks = [
+  {check = "unchanged", state = "QUESTION", sections = ["결과별 다음 행동"], only = ["eda"]},
+]

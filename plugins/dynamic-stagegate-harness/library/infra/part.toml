@@ -1,0 +1,10 @@
+name = "infra"
+description = "공용 코드를 고치는 작은 경로(infra)"
+version = 1
+origin = "library"
+requires = ["experiment"]
+applies_when = {answer = {work = "experiment"}}
+
+[kinds.infra]
+states = ["IMPLEMENT", "RECORD"]
+limit = {max_files = 5}

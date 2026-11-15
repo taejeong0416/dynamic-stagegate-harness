@@ -1,0 +1,31 @@
+name = "competition-stages"
+description = "대회 단계(준비, baseline, 결합, 동결, 재현)와 단계별 허용 종류"
+version = 1
+origin = "library"
+requires = ["experiment", "measure", "infra"]
+applies_when = {answer = {work = "experiment", ships = "yes"}}
+
+[[stages]]
+n = 0
+name = "준비, EDA"
+kinds = ["eda", "infra"]
+
+[[stages]]
+n = 1
+name = "baseline, 주력 확정"
+kinds = ["model", "tune", "eda", "infra"]
+
+[[stages]]
+n = 2
+name = "결합"
+kinds = ["new", "model", "tune", "eda", "infra"]
+
+[[stages]]
+n = 3
+name = "동결"
+kinds = ["freeze", "tune", "infra"]
+
+[[stages]]
+n = 4
+name = "재현, 최종 제출"
+kinds = ["repro", "infra"]

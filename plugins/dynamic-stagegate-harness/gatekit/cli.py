@@ -311,7 +311,7 @@ def cmd_commit_msg(a, flow):
 
 def cmd_lint(a, flow):
     cfg = parse_config(Path(a.file).read_text(encoding="utf-8")) if a.file else CFG
-    bad = evolve.lint(cfg)
+    bad = evolve.lint(cfg) + ([] if a.file else evolve.parts_problems())
     for b in bad:
         print("실패", b)
     print(f"lint: 문제 {len(bad)}건")
@@ -327,6 +327,17 @@ def cmd_diagnose(a, flow):
     why = evolve.review_due(flow)
     if why:
         print("\n하네스 점검을 권하는 이유: " + "; ".join(why))
+
+
+def cmd_parts(a, flow):
+    print("\n".join(evolve.parts_report()))
+
+
+def cmd_propose(a, flow):
+    d = evolve.propose(a.hid).relative_to(ROOT).as_posix()
+    print(f"{d}에 지금 부품(parts)과 local.toml의 사본을 만들었다. 이 사본에서 부품을 더하고 빼고 고친 뒤 "
+          f".gate/proposals/{a.hid}.md에 근거를 쓰고 {CLI} check-proposal {a.hid}를 돌린다. "
+          "라이브러리 부품은 .gate/library/<이름> 폴더를 사본의 parts 아래에 복사해서 더한다.")
 
 
 def cmd_check_proposal(a, flow):
@@ -346,8 +357,9 @@ def cmd_adopt(a, flow):
     v = evolve.adopt(flow, a.hid, a.approved)
     save(flow)
     print(f"구조 버전 {v}를 적용했다. 진행 중인 계획은 시작할 때의 버전을 계속 쓴다.")
-    print("  하네스 커밋: git add .gate/config.toml .gate/history, git commit -m \"harness: "
-          f"{a.hid} 구조 변경\"")
+    files = ".gate/config.toml .gate/history" + (" .gate/parts .gate/local.toml .gate/parts.lock"
+                                                 if evolve.PARTS.exists() else "")
+    print(f"  하네스 커밋: git add -A {files}, git commit -m \"harness: {a.hid} 구조 변경\"")
     print("  그다음 상태 파일과 제안서를 일반 커밋으로 남긴다: git add .gate/state.json .gate/proposals")
 
 
@@ -388,6 +400,9 @@ def main(argv=None):
     de = sub.add_parser("describe")
     de.add_argument("--mermaid", action="store_true", help="종류마다 상태 경로를 Mermaid 다이어그램으로 출력")
     sub.add_parser("diagnose")
+    sub.add_parser("parts")
+    pr = sub.add_parser("propose")
+    pr.add_argument("hid")
     cp = sub.add_parser("check-proposal")
     cp.add_argument("hid")
     cp.add_argument("--review", action="store_true")
@@ -398,8 +413,8 @@ def main(argv=None):
     cmds = {"start": cmd_start, "next": cmd_next, "back": cmd_back, "run": cmd_run, "abandon": cmd_abandon,
             "hold": cmd_hold, "stage": cmd_stage, "status": cmd_status, "git-pre-commit": cmd_pre_commit,
             "git-commit-msg": cmd_commit_msg, "lint": cmd_lint, "describe": cmd_describe, "diagnose": cmd_diagnose,
-            "check-proposal": cmd_check_proposal, "adopt": cmd_adopt}
-    if a.cmd in ("status", "git-pre-commit", "git-commit-msg", "lint", "describe", "diagnose"):
+            "check-proposal": cmd_check_proposal, "adopt": cmd_adopt, "parts": cmd_parts, "propose": cmd_propose}
+    if a.cmd in ("status", "git-pre-commit", "git-commit-msg", "lint", "describe", "diagnose", "parts"):
         cmds[a.cmd](a, load())
         return
     with Lock():

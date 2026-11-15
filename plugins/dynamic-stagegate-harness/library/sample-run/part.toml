@@ -1,0 +1,25 @@
+name = "sample-run"
+description = "긴 실행 전에 작은 표본으로 끝까지 돌려 보게 한다"
+version = 1
+origin = "library"
+covers = ["data", "resource"]
+applies_when = {answer = {failure_cost = "time"}}
+
+[project]
+unreviewed = ["표본 실행"]
+
+[sections."표본 실행"]
+body = """
+- 명령:
+- 커밋:
+- 결과 요약:
+"""
+
+[[attach]]
+roles = ["implement"]
+at = 70
+sections = ["표본 실행"]
+todo = ["작은 표본으로 끝까지 돌려 보고, 명령, 커밋, 결과 요약을 \"표본 실행\" 절에 쓴다."]
+checks = [
+  {check = "sample", section = "표본 실행", skip = ["infra"]},
+]

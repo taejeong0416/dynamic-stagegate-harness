@@ -29,9 +29,10 @@ DEFAULTS = {
     "code": [],
     "tracked": [],
     "harness": [".gate/gatekit/", ".gate/gate.py", ".gate/config.toml", ".gate/history/", ".gate/library/",
-                ".gate/GATE.md", ".githooks/"],
+                ".gate/parts/", ".gate/local.toml", ".gate/parts.lock", ".gate/GATE.md", ".githooks/"],
     # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 gate adopt로만 바꾼다
-    "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py", ".githooks/"],
+    "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py", ".gate/parts/",
+                  ".gate/local.toml", ".gate/parts.lock", ".githooks/"],
     "harness_prefix": "harness:",
     "max_visits": 3,
     "files_section": "변경 파일",

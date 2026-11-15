@@ -1,0 +1,35 @@
+name = "test-first"
+description = "구현 전에 실패하는 테스트를 먼저 쓰고 고정한다"
+version = 1
+origin = "library"
+requires = ["feature"]
+covers = ["logic"]
+applies_when = {answer = {work = "service", tests = "yes"}}
+
+[states.TESTFIRST]
+code = true
+edit = "tests"
+sections = ["테스트 계획"]
+todo = [
+  "수용 기준마다 테스트를 먼저 쓰고 \"변경 파일\" 표에 넣는다. 이 상태에서는 테스트 파일만 고칠 수 있다.",
+  "테스트를 커밋한다. \"새 테스트 명령\"이 지금 실패해야 넘어간다(구현 전이라 실패하는 게 맞다).",
+]
+checks = [
+  {check = "files_listed"},
+  {check = "clean"},
+  {check = "files_changed", any = true},
+  {check = "command", section = "테스트 계획", item = "새 테스트 명령", expect = "fail"},
+]
+
+[[insert]]
+state = "TESTFIRST"
+before = "implement"
+only = ["feature"]
+
+[[attach]]
+states = ["TEST"]
+at = 40
+checks = [
+  {check = "test_edits", state = "TESTFIRST", section = "테스트 수정", only = ["feature"]},
+  {check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"]},
+]

@@ -12,8 +12,17 @@ import unittest
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "dynamic-stagegate-harness"
+COMBOS = Path(__file__).resolve().parent / "combos"
+sys.path.insert(0, str(PLUGIN))
+from gatekit import parts as PT  # noqa: E402
 PY = [sys.executable, "-X", "utf8"]
 ENV = {k: v for k, v in os.environ.items() if k != "GATE_REVIEW"} | {"PYTHONDONTWRITEBYTECODE": "1"}
+# 실제로 돌아 본 조합. 이 답이면 tests/combos/<이름>.toml 구조가 조립되어야 한다
+ANSWERS = {
+    "ml": {"work": "experiment", "run": "remote", "ships": "yes", "failure_cost": "time"},
+    "service": {"work": "service", "tests": "yes"},
+    "agent": {"work": "agent"},
+}
 # 검토자 대신 쓰는 claude. 받은 지시문과 옵션을 남기고 PASS를 돌려준다
 FAKE_CLAUDE = '''import json, os, sys
 prompt = sys.stdin.buffer.read().decode("utf-8")
@@ -28,7 +37,7 @@ def run(cmd, cwd, stdin=None, env=ENV):
 
 
 class Repo(unittest.TestCase):
-    """테스트마다 새 저장소. service preset을 설치하고 chore에 quick 선택과 실행 상태를 더한다"""
+    """테스트마다 새 저장소. service 조합을 설치하고 chore에 quick 선택과 실행 상태를 더한다"""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -68,6 +77,8 @@ class Repo(unittest.TestCase):
         return [x["prompt"] for x in self.calls()]
 
     def install(self, *args, target=None):
+        if args and args[0] in ANSWERS:
+            args = [x for k, v in ANSWERS[args[0]].items() for x in ("--answer", f"{k}={v}")] + list(args[1:])
         return run([*PY, str(PLUGIN / "scripts" / "install.py"), *args, "--target", str(target or self.root)], self.root)
 
     def write(self, rel, text):
@@ -122,6 +133,55 @@ class InstallTest(Repo):
     def test_설치하지_않은_프로젝트에서는_hook이_아무것도_하지_않는다(self):
         self.assertIsNone(self.guard("Write", file_path=str(self.root / "src" / "a.py")))
 
+    def test_답으로_부품을_골라_조립하고_lock을_남긴다(self):
+        r = self.install("service")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("  test-first: ", r.stdout.split("뺀 부품")[0])
+        self.assertIn("  run-record: ", r.stdout.split("뺀 부품")[1])
+        gate = self.root / ".gate"
+        self.assertEqual(sorted(p.name for p in (gate / "parts").iterdir()),
+                         ["bugfix", "chore", "diff-review", "feature", "test-first"])
+        self.assertEqual((gate / "config.toml").read_text(encoding="utf-8"),
+                         (COMBOS / "service.toml").read_text(encoding="utf-8"))
+        self.assertIn('work = "service"', (gate / "local.toml").read_text(encoding="utf-8"))
+        lock = json.loads((gate / "parts.lock").read_text(encoding="utf-8"))
+        self.assertEqual(lock["feature"]["from"], lock["feature"]["hash"])
+        self.assertEqual(self.gate("lint").returncode, 0, self.gate("lint").stdout)
+        self.assertIn("- test-first v1 (library)", self.gate("parts").stdout)
+
+    def test_dry_run은_쓰지_않고_함께_조립되지_않는_부품이면_멈춘다(self):
+        r = self.install("--answer", "work=service", "--dry-run")
+        self.assertIn("  feature: ", r.stdout)
+        self.assertFalse((self.root / ".gate").exists())
+        r = self.install("--answer", "work=experiment,service")
+        self.assertIn("[states.PLAN]: experiment와 feature가 다르게 정의한다", r.stderr)
+        self.assertFalse((self.root / ".gate").exists())
+
+    def test_local_파일의_덮어쓰기가_조립_결과에_들어간다(self):
+        self.write("in.toml", '[answers]\nwork = "agent"\n\n[project]\ncode = ["bot/*"]\n\n[states.RECORD]\ntodo = ["x"]\n')
+        self.assertEqual(self.install("--local", "in.toml").returncode, 0)
+        cfg = PT.tomllib.loads((self.root / ".gate" / "config.toml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["project"]["code"], ["bot/*"])
+        self.assertEqual(cfg["states"]["RECORD"]["todo"], ["x"])
+        self.assertIn("checks", cfg["states"]["RECORD"])
+        self.assertEqual(self.gate("lint").returncode, 0, self.gate("lint").stdout)
+
+    def test_config를_직접_고치면_lint가_조립_결과와_다르다고_알린다(self):
+        self.install("service")
+        self.edit(".gate/config.toml", ("max_visits = 3", "max_visits = 9"))
+        self.assertIn("config.toml이 부품과 local.toml을 조립한 결과와 다르다", self.gate("lint").stdout)
+
+    def test_parts는_조건이_바뀐_부품을_알린다(self):
+        self.install("--answer", "work=service")
+        out = self.gate("parts").stdout
+        self.assertIn("- test-first: ", out.split("쓰지 않는 라이브러리 부품")[1])
+        self.assertNotIn("조건이 맞는다", out)
+        self.edit(".gate/local.toml", ('work = "service"', 'work = "agent"\ntests = "yes"'))
+        out = self.gate("parts").stdout
+        self.assertIn("- feature v1 (library): 기능 경로(feature, refactor). 명세, 계획, 구현, 테스트, 기록으로 간다 "
+                      "[조건이 거짓이 됐다(답 work = service). 제거 제안서를 검토한다]", out)
+        self.assertIn("(조건: 답 work = agent) [조건이 맞는다. 추가 제안서를 검토한다]", out)
+
     def test_update는_config를_그대로_둔다(self):
         self.setup_harness()
         before = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
@@ -131,11 +191,29 @@ class InstallTest(Repo):
 
 
 class LintTest(Repo):
-    def test_preset은_모두_lint를_통과한다(self):
+    def test_조합의_답으로_조립하면_기대_구조가_나오고_lint를_통과한다(self):
         self.setup_harness()
-        for preset in sorted(p.name for p in (PLUGIN / "presets").iterdir()):
-            r = self.gate("lint", "--file", str(PLUGIN / "presets" / preset / "config.toml"))
-            self.assertEqual(r.returncode, 0, preset + "\n" + r.stdout)
+        for name, answers in ANSWERS.items():
+            on, _ = PT.select(PT.load_parts(PLUGIN / "library"), self.root, answers)
+            cfg, bad = PT.assemble(on)
+            self.assertEqual(bad, [], name)
+            text = PT.dumps(cfg, PT.HEAD)
+            self.assertEqual(PT.tomllib.loads(text), cfg, name)
+            self.assertEqual(text, (COMBOS / f"{name}.toml").read_text(encoding="utf-8"), name)
+            r = self.gate("lint", "--file", str(COMBOS / f"{name}.toml"))
+            self.assertEqual(r.returncode, 0, name + "\n" + r.stdout)
+
+    def test_조립은_빠진_부품과_붙을_자리가_없는_부품을_문제로_낸다(self):
+        lib = {p["name"]: p for p in PT.load_parts(PLUGIN / "library")}
+        _, bad = PT.assemble([lib["test-first"], lib["bugfix"]])
+        self.assertIn("test-first: 필요한 부품 feature이 없다", bad)
+        self.assertIn("test-first: TESTFIRST를 넣을 자리(역할 implement)가 어느 종류에도 없다", bad)
+        self.assertIn("test-first: attach 1번이 붙을 상태가 없다(역할 [], 상태 ['TEST'])", bad)
+        cfg, bad = PT.assemble([lib["eval"], lib["bugfix"], lib["chore"], lib["diff-review"], lib["run-record"]])
+        self.assertEqual(bad, [])
+        self.assertEqual(cfg["kinds"]["behavior"]["states"][-4:], ["EVAL", "REVIEW", "RECORD", "REPLAN"])
+        self.assertEqual(cfg["kinds"]["behavior"]["back"]["REVIEW"], ["IMPLEMENT", "EVALSET", "SPEC"])
+        self.assertEqual(cfg["states"]["EVAL"]["checks"][0], {"check": "run_record"})
 
     def test_검토자_추론_단계는_claude가_받는_값만_쓴다(self):
         self.setup_harness()
@@ -538,31 +616,30 @@ class FeatureTest(Repo):
         self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
 
     def test_제안서_진단에_빼거나_푸는_변경이_나온다(self):
-        cfg = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
-        new = cfg.replace("version = 1", "version = 2", 1)
-        new = new.replace('\n# 테스트 파일([project] tests)만 고치고 커밋할 수 있다\nedit = "tests"', "", 1)
-        new = new.replace('  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"]},\n', "")
-        self.assertIn('[states.REPRO]\ncode = true\nedit = "tests"', new)
+        self.assertEqual(self.gate("propose", "H001").returncode, 0)
+        self.edit(".gate/proposals/H001/parts/test-first/part.toml", ('code = true\nedit = "tests"', "code = true"))
+        self.edit(".gate/proposals/H001/parts/feature/part.toml",
+                  ('  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"]},\n', ""))
         self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| covers 빼기 | 없음 |\n\n"
-                   "## 진행 중인 계획\n\n없음\n\n## 새 구조\n\n```toml\n" + new + "\n```\n")
+                   "## 진행 중인 계획\n\n없음\n")
         self.gate("check-proposal", "H001")
         diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        self.assertIn("## 부품 변경\n\n- 고침: feature\n- 고침: test-first\n", diag)
         self.assertIn("- feature/TEST: 검사 covers(section=테스트 결과, from=수용 기준, only=['feature'])가 빠지거나 바뀐다",
                       diag)
         self.assertIn("- feature/TESTFIRST: 테스트 파일만 고치는 제한이 풀린다", diag)
         self.assertNotIn("bugfix/REPRO", diag)
 
     def test_제안서_진단에_project_review_remote_설정을_푸는_변경이_나온다(self):
-        cfg = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
-        new = cfg.replace("version = 1", "version = 2", 1)
-        new = new.replace('code = ["src/*", "app/*",', 'code = ["app/*",', 1)
-        new = new.replace('unreviewed = ["테스트 결과",', 'unreviewed = ["요구사항", "테스트 결과",', 1)
-        new = new.replace("max_visits = 3", "max_visits = 9", 1)
-        new = new.replace('tools = "Read,Grep,Glob"\n', 'tools = "Read,Grep,Glob,Bash"\nmodel = "haiku"\ncontext_full = 9000\n', 1)
-        new = new.replace('effort = "high"', 'effort = "low"', 1)
-        new = new.replace('stop_states = ["RECORD"]', "stop_states = []", 1)
+        self.gate("propose", "H001")
+        self.edit(".gate/proposals/H001/parts/feature/part.toml",
+                  ('code = ["src/*", "app/*",', 'code = ["app/*",'),
+                  ('unreviewed = ["테스트 결과",', 'unreviewed = ["요구사항", "테스트 결과",'),
+                  ('tools = "Read,Grep,Glob"\n', 'tools = "Read,Grep,Glob,Bash"\nmodel = "haiku"\ncontext_full = 9000\n'),
+                  ('effort = "high"', 'effort = "low"'), ('stop_states = ["RECORD"]', "stop_states = []"))
+        self.write(".gate/proposals/H001/local.toml", '[answers]\nwork = "service"\n\n[project]\nmax_visits = 9\n')
         self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| 설정 | 없음 |\n\n"
-                   "## 진행 중인 계획\n\n없음\n\n## 새 구조\n\n```toml\n" + new + "\n```\n")
+                   "## 진행 중인 계획\n\n없음\n")
         self.gate("check-proposal", "H001")
         diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
         for line in ("[project] code: src/*가 빠진다", "[project] unreviewed: 요구사항가 늘어난다",
@@ -570,6 +647,32 @@ class FeatureTest(Repo):
                      "[review] tools: Bash가 늘어난다", "[review] model: 기본에서 haiku로 낮아진다",
                      "[review] effort: high에서 low로 낮아진다", "[review] context_full: 바뀐 설정(6000에서 9000)"):
             self.assertIn(line, diag)
+
+    def test_제안서로_부품을_빼면_adopt가_부품과_lock과_구조를_함께_바꾼다(self):
+        self.git("checkout", "-q", ".gate/config.toml")
+        self.gate("propose", "H001")
+        shutil.rmtree(self.root / ".gate" / "proposals" / "H001" / "parts" / "diff-review")
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| REVIEW 빼기 | 없음 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        r = self.gate("check-proposal", "H001", "--review")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        self.assertIn("- 뺌: diff-review", diag)
+        self.assertIn("- feature: 상태 REVIEW가 빠진다", diag)
+        self.edit(".gate/proposals/H001/parts/chore/part.toml", ("max_files = 5", "max_files = 6"))
+        self.assertIn("검토 뒤 바뀌었다", self.gate("adopt", "H001", "--approved", "적용해").stderr)
+        self.edit(".gate/proposals/H001/parts/chore/part.toml", ("max_files = 6", "max_files = 5"))
+        r = self.gate("adopt", "H001", "--approved", "적용해")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        gate = self.root / ".gate"
+        cfg = PT.tomllib.loads((gate / "config.toml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["version"], 2)
+        self.assertNotIn("REVIEW", cfg["states"])
+        self.assertFalse((gate / "parts" / "diff-review").exists())
+        self.assertNotIn("diff-review", json.loads((gate / "parts.lock").read_text(encoding="utf-8")))
+        self.assertTrue((gate / "history" / "v1.toml").exists())
+        self.assertEqual(self.gate("lint").returncode, 0, self.gate("lint").stdout)
+        self.assertIn("- diff-review: ", self.gate("parts").stdout.split("쓰지 않는 라이브러리 부품")[1])
 
     def test_먼저_쓴_테스트를_고치면_표에_적어야_하고_구현한_뒤에도_TESTFIRST를_다시_지난다(self):
         self.feature_to_test()

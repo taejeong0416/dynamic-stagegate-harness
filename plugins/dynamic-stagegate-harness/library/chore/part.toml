@@ -1,0 +1,9 @@
+name = "chore"
+description = "작은 변경 경로(chore). 파일 수 상한이 있다"
+version = 1
+origin = "library"
+applies_when = {any = [{answer = {work = "service"}}, {answer = {work = "agent"}}]}
+
+[kinds.chore]
+states = ["IMPLEMENT", "RECORD"]
+limit = {max_files = 5}

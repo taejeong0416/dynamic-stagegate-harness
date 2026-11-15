@@ -11,13 +11,16 @@ import shutil
 import statistics
 import string
 import time
+import tomllib
 from datetime import datetime
 
+from . import parts as PT
 from .checks import CHECKS, applies, call_reviewer
 from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
 PROPOSALS = GATE_DIR / "proposals"
+PARTS = GATE_DIR / "parts"
 COND_KEYS = {"option", "changed", "max_files", "not", "any"}
 MUST_PROTECT = (".gate/config.toml", ".gate/history/", ".gate/gatekit/")
 # 검사가 section을 주지 않을 때 쓰는 기본 절
@@ -155,6 +158,52 @@ def lint(cfg):
             if k not in cfg["kinds"]:
                 bad.append(f"{st.get('n')}단계의 종류 {k}가 [kinds]에 없다")
     return bad
+
+
+# 부품
+
+def parts_problems():
+    """부품을 쓰는 프로젝트에서 부품, parts.lock, config.toml이 서로 맞는지"""
+    if not PARTS.exists():
+        return []
+    cfg, bad, used = PT.build(GATE_DIR, CFG["version"])
+    if not bad and cfg != tomllib.loads((GATE_DIR / "config.toml").read_text(encoding="utf-8")):
+        bad.append("config.toml이 부품과 local.toml을 조립한 결과와 다르다. 구조는 제안서와 adopt로만 바꾼다")
+    locked = PT.read_lock(GATE_DIR)
+    names = {p["name"] for p in used}
+    bad += [f"부품 {p['name']}의 파일이 parts.lock과 다르다" for p in used
+            if locked.get(p["name"], {}).get("hash") != p["_hash"]]
+    bad += [f"parts.lock의 부품 {n}이 parts 폴더에 없다" for n in locked if n not in names]
+    return bad
+
+
+def parts_report():
+    """쓰는 부품과 쓰지 않는 라이브러리 부품의 상태. 적용 조건은 지금 저장소와 답으로 다시 판정한다"""
+    if not PARTS.exists():
+        return ["부품을 쓰지 않는 구조다(config.toml이 원본이다)"]
+    used, lib = PT.load_parts(PARTS), {p["name"]: p for p in PT.load_parts(GATE_DIR / "library")}
+    locked, answers = PT.read_lock(GATE_DIR), PT.read_local(GATE_DIR)[1]
+    out = ["쓰는 부품"]
+    for p in used:
+        notes = []
+        src = lib.get(p["name"])
+        if src and locked.get(p["name"], {}).get("from") != p["_hash"]:
+            notes.append("프로젝트에서 고침")
+        if src and src.get("version", 1) > p.get("version", 1):
+            notes.append(f"라이브러리에 v{src['version']}이 있다")
+        if p.get("applies_when") and not PT.holds(p["applies_when"], ROOT, answers):
+            notes.append(f"조건이 거짓이 됐다({PT.fmt_cond(p['applies_when'])}). 제거 제안서를 검토한다")
+        out.append(f"- {p['name']} v{p.get('version', 1)} ({p.get('origin', 'library')}): {p.get('description', '')}"
+                   + (" [" + "; ".join(notes) + "]" if notes else ""))
+    names = {p["name"] for p in used}
+    out += ["", "쓰지 않는 라이브러리 부품"]
+    for name, p in lib.items():
+        if name in names:
+            continue
+        cond = p.get("applies_when")
+        hit = " [조건이 맞는다. 추가 제안서를 검토한다]" if cond and PT.holds(cond, ROOT, answers) else ""
+        out.append(f"- {name}: {p.get('description', '')} (조건: {PT.fmt_cond(cond or {}) or '없음'}){hit}")
+    return out
 
 
 # describe
@@ -402,6 +451,8 @@ def diagnose(flow):
         lines.append("- code 패턴 밖에서 바뀐 파일: " + (", ".join(outside[:20]) or "없음"))
     else:
         lines.append("- 기준 커밋이 없다")
+    if PARTS.exists():
+        lines += ["", "## 부품", "", *parts_report()]
     return "\n".join(lines)
 
 
@@ -414,6 +465,59 @@ def proposal_path(hid):
 def proposal_config(text):
     m = re.search(r"^## 새 구조\s*\n+```toml\n(.*?)\n```", text, re.S | re.M)
     return m.group(1) if m else None
+
+
+def propose(hid):
+    """지금 부품과 local.toml의 사본을 제안서 폴더에 만든다. 에이전트는 이 사본을 고친다"""
+    if not PARTS.exists():
+        raise SystemExit("부품을 쓰지 않는 구조다. 제안서의 '새 구조' 절에 새 config.toml 전체를 쓴다")
+    d = PROPOSALS / hid
+    if d.exists():
+        raise SystemExit(f"{d.relative_to(ROOT).as_posix()}가 이미 있다")
+    shutil.copytree(PARTS, d / "parts")
+    if (GATE_DIR / "local.toml").exists():
+        shutil.copy2(GATE_DIR / "local.toml", d / "local.toml")
+    return d
+
+
+def proposed(hid, text):
+    """제안서가 정하는 새 구조. (구조, config.toml 글, 문제 목록, 부품 변경 목록)"""
+    if not PARTS.exists():
+        raw = proposal_config(text)
+        if raw is None:
+            return None, None, ["'새 구조' 절에 ```toml 블록이 없다"], []
+        try:
+            new = parse_config(raw)
+        except Exception as e:
+            return None, None, [f"새 구조를 읽지 못했다: {e}"], []
+        bad = [] if new["version"] == CFG["version"] + 1 else [
+            f"새 구조의 version은 {CFG['version'] + 1}이어야 한다(지금 {CFG['version']})"]
+        return new, raw.rstrip("\n") + "\n", bad, []
+    d = PROPOSALS / hid
+    if not (d / "parts").exists():
+        return None, None, [f"{d.relative_to(ROOT).as_posix()}/parts가 없다. propose {hid}로 사본을 만들어 고친다"], []
+    try:
+        cfg, bad, used = PT.build(d, CFG["version"] + 1)
+    except Exception as e:
+        return None, None, [f"제안서의 부품을 읽지 못했다: {e}"], []
+    old = {p["name"]: p["_hash"] for p in PT.load_parts(PARTS)}
+    new_ = {p["name"]: p["_hash"] for p in used}
+    changes = ([f"더함: {n}" for n in new_ if n not in old] + [f"뺌: {n}" for n in old if n not in new_]
+               + [f"고침: {n}" for n in new_ if n in old and old[n] != new_[n]])
+    a, b = (PT.read_local(x)[0] for x in (GATE_DIR, d))
+    changes += ["고침: local.toml"] if a != b else []
+    raw = PT.dumps(cfg, PT.HEAD)
+    return parse_config(raw), raw, [f"조립: {x}" for x in bad], changes
+
+
+def proposal_hash(hid, text):
+    """제안서 글과 제안서 폴더의 부품, local.toml을 함께 본 해시. 검토 뒤 바뀌면 다시 검토한다"""
+    h = hashlib.sha256(text.encode("utf-8"))
+    d = PROPOSALS / hid
+    for f in sorted(d.rglob("*")) if d.exists() else []:
+        if f.is_file():
+            h.update(f.relative_to(d).as_posix().encode() + b"\0" + f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:16]
 
 
 def replay(flow, new):
@@ -562,30 +666,26 @@ def check_proposal(flow, hid, allow_review):
         miss.append("'바꾸는 것' 표에 칸이 모두 찬 행(바꾸는 것 | 근거)이 없다")
     if not body(s.get("진행 중인 계획", [])):
         miss.append("'진행 중인 계획' 절이 비었다")
-    raw = proposal_config(text)
-    if raw is None:
-        return miss + ["'새 구조' 절에 ```toml 블록이 없다"]
-    try:
-        new = parse_config(raw)
-    except Exception as e:
-        return miss + [f"새 구조를 읽지 못했다: {e}"]
-    if new["version"] != CFG["version"] + 1:
-        miss.append(f"새 구조의 version은 {CFG['version'] + 1}이어야 한다(지금 {CFG['version']})")
+    new, raw, bad, changes = proposed(hid, text)
+    if new is None:
+        return miss + bad
+    miss += bad
     problems = lint(new)
     miss += [f"lint: {x}" for x in problems]
     cur = (GATE_DIR / "config.toml").read_text(encoding="utf-8")
-    diff = "".join(difflib.unified_diff(cur.splitlines(True), (raw + "\n").splitlines(True), "지금 config.toml",
-                                        "새 구조"))
+    diff = "".join(difflib.unified_diff(cur.splitlines(True), raw.splitlines(True), "지금 config.toml", "새 구조"))
     diag = PROPOSALS / f"{hid}.diag.md"
     loose = [f"- {x}" for x in weakened(CFG, new)] or ["없음"]
-    diag.write_text("\n".join([diagnose(flow), "", "## lint", "", *(problems or ["문제 없음"]), "", "## 빼거나 푸는 변경", "",
+    part_lines = ["## 부품 변경", "", *[f"- {c}" for c in changes or ["없음"]], ""] if PARTS.exists() else []
+    diag.write_text("\n".join([diagnose(flow), "", *part_lines,
+                               "## lint", "", *(problems or ["문제 없음"]), "", "## 빼거나 푸는 변경", "",
                                *loose, "", "## 지난 계획 재생", "",
                                *replay(flow, new), "", "## 새 구조 경로", "", describe(new), "", mermaid(new),
                                "## diff", "",
                                "```diff", diff, "```", ""]), encoding="utf-8")
     if miss:
         return miss
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    h = proposal_hash(hid, text)
     rec = flow.setdefault("proposals", {}).get(hid)
     if rec and rec["hash"] == h and rec["pass"]:
         return []
@@ -603,24 +703,32 @@ def adopt(flow, hid, approved):
         raise SystemExit(f"{path.relative_to(ROOT).as_posix()}가 없다")
     text = path.read_text(encoding="utf-8")
     rec = flow.get("proposals", {}).get(hid)
-    h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    h = proposal_hash(hid, text)
     if not rec or not rec["pass"] or rec["hash"] != h:
         raise SystemExit(f"{hid}가 check-proposal 검토를 통과하지 않았거나 검토 뒤 바뀌었다. check-proposal {hid} --review를 먼저 한다")
     if rec.get("adopted"):
         raise SystemExit(f"{hid}는 이미 적용했다")
     if not approved.strip():
         raise SystemExit("--approved에 사용자가 이번 턴에 승인한 문장을 그대로 넣는다")
-    raw = proposal_config(text)
-    new = parse_config(raw)
-    if new["version"] != CFG["version"] + 1 or lint(new):
+    new, raw, bad, _ = proposed(hid, text)
+    if new is None or bad or lint(new):
         raise SystemExit("새 구조의 version이나 lint가 맞지 않다. check-proposal을 다시 한다")
     hist = GATE_DIR / "history"
     hist.mkdir(exist_ok=True)
     shutil.copy2(GATE_DIR / "config.toml", hist / f"v{CFG['version']}.toml")
-    (GATE_DIR / "config.toml").write_text(raw.rstrip("\n") + "\n", encoding="utf-8")
-    rec.update({"adopted": True, "approved": " ".join(approved.split()), "adopted_at": now()})
+    (GATE_DIR / "config.toml").write_text(raw, encoding="utf-8")
     flow["harness"] = {"version": new["version"], "adopted": hid, "at": now(), "ts": time.time(), "commit": head(),
                        "stage": flow.get("stage")}
+    if PARTS.exists():
+        d, old = PROPOSALS / hid, PT.read_lock(GATE_DIR)
+        shutil.rmtree(PARTS)
+        shutil.copytree(d / "parts", PARTS)
+        if (d / "local.toml").exists():
+            shutil.copy2(d / "local.toml", GATE_DIR / "local.toml")
+        used = PT.load_parts(PARTS)
+        PT.write_lock(GATE_DIR, used, old)
+        flow["harness"]["lock"] = PT.lock_hash(used)
+    rec.update({"adopted": True, "approved": " ".join(approved.split()), "adopted_at": now()})
     return new["version"]
 
 

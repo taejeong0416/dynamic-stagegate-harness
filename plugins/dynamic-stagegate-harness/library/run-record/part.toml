@@ -1,0 +1,21 @@
+name = "run-record"
+description = "실행 상태에서 gate run 기록과 코드 고정을 요구하고 학습 서버 설정을 둔다"
+version = 1
+origin = "library"
+covers = ["resource", "env"]
+applies_when = {answer = {run = "remote"}}
+
+[remote]
+host = ""
+port = 22
+dir = "~/project"
+
+[[attach]]
+roles = ["execute"]
+at = 40
+run = true
+todo = ["gate run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.", "답에 남은 시간과 끝나는 시각을 쓴다."]
+checks = [
+  {check = "run_record"},
+  {check = "code_unchanged"},
+]

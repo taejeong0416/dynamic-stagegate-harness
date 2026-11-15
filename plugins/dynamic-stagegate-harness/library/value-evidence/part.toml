@@ -1,0 +1,24 @@
+name = "value-evidence"
+description = "코드에 넣은 숫자 값마다 근거를 적게 한다"
+version = 1
+origin = "library"
+covers = ["plan"]
+applies_when = {answer = {work = "experiment"}}
+
+[project]
+unreviewed = ["값 근거"]
+
+[sections."값 근거"]
+body = """
+| 값 | 쓰는 곳 | 근거 |
+|---|---|---|
+"""
+
+[[attach]]
+roles = ["implement", "measure"]
+at = 60
+sections = ["값 근거"]
+todo = ["코드에 넣은 숫자 값(0과 1 제외)을 \"값 근거\" 표에 모두 쓴다. 값 칸에는 숫자 하나만 쓰고, 근거가 없으면 \"근거 없이 정한 값\"으로 쓴다."]
+checks = [
+  {check = "numbers", section = "값 근거"},
+]
