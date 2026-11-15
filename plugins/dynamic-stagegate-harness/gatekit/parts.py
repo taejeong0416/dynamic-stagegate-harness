@@ -15,7 +15,7 @@ from pathlib import Path
 META = ("name", "description", "version", "origin", "source", "provenance", "applies_when", "requires", "conflicts", "covers",
         "attach", "insert")
 TABLES = ("kinds", "sections", "states")
-SETTINGS = ("project", "remote", "review")
+SETTINGS = ("project", "remote", "review", "records")
 # attach에서 대상을 고르는 키와 순서 키. 나머지는 상태에 더하는 내용이다
 ATTACH_KEYS = ("roles", "states", "only", "skip", "at")
 
@@ -84,8 +84,8 @@ def assemble(parts, local=None):
     for p in parts:
         bad += [f"{p['name']}: 필요한 부품 {r}이 없다" for r in p.get("requires", []) if r not in names]
         bad += [f"{p['name']}: 부품 {c}와 같이 둘 수 없다" for c in p.get("conflicts", []) if c in names]
-    cfg = {"version": 1, "project": {}, "remote": {}, "review": {}, "stages": [], "kinds": {}, "sections": {},
-           "states": {}}
+    cfg = {"version": 1, "project": {}, "remote": {}, "review": {}, "records": {}, "stages": [], "kinds": {},
+           "sections": {}, "states": {}, "guard": []}
     owner = {}
 
     def setting(table, key, val, who):
@@ -102,6 +102,7 @@ def assemble(parts, local=None):
         for table in SETTINGS:
             for key, val in p.get(table, {}).items():
                 setting(table, key, val, p["name"])
+        cfg["guard"] += [dict(g, part=p["name"]) for g in p.get("guard", [])]
         if p.get("stages"):
             if cfg["stages"]:
                 bad.append(f"[[stages]]: {owner['stages']}와 {p['name']}가 함께 정한다")
@@ -136,8 +137,17 @@ def assemble(parts, local=None):
                 bad.append(f"{p['name']}: {state}를 넣을 자리(역할 {role})가 어느 종류에도 없다")
 
     # 상태에 더하기. 상태 정의를 at 50으로 두고 at, 쌓는 순서, 부품 이름 순으로 잇는다
-    blocks = {name: [(50, -1, "", 0, {k: v for k, v in st.items() if k != "roles"})]
-              for name, st in cfg["states"].items()}
+    def marked(fields, who):
+        """검사와 검토에 어느 부품의 것인지 적는다. 막힌 기록과 검토 비용을 부품별로 모으는 데 쓴다"""
+        out = copy.deepcopy({k: v for k, v in fields.items() if k not in ATTACH_KEYS and k != "roles"})
+        out["checks"] = [dict(c, part=who) for c in out.get("checks", [])]
+        if not out["checks"]:
+            del out["checks"]
+        if out.get("review"):
+            out["review_part"] = who
+        return out
+
+    blocks = {name: [(50, -1, "", 0, marked(st, owner["states", name]))] for name, st in cfg["states"].items()}
     for p in parts:
         for i, rule in enumerate(p.get("attach", [])):
             targets = _targets(cfg, rule)
@@ -145,15 +155,14 @@ def assemble(parts, local=None):
                 bad.append(f"{p['name']}: attach {i + 1}번이 붙을 상태가 없다"
                            f"(역할 {rule.get('roles', [])}, 상태 {rule.get('states', [])})")
             for name in targets:
-                blocks[name].append((rule.get("at", 50), rank(p), p["name"], i,
-                                     {k: v for k, v in rule.items() if k not in ATTACH_KEYS}))
+                blocks[name].append((rule.get("at", 50), rank(p), p["name"], i, marked(rule, p["name"])))
     for name, items in blocks.items():
         roles, st, src = cfg["states"][name].get("roles"), {}, {}
         for _, _, who, _, fields in sorted(items, key=lambda b: b[:4]):
             for key, val in fields.items():
                 if isinstance(val, list):
                     st[key] = st.get(key, []) + [x for x in copy.deepcopy(val) if key == "checks" or x not in st.get(key, [])]
-                elif key in st and st[key] != val:
+                elif key in st and st[key] != val and key != "review_part":
                     bad.append(f"[states.{name}] {key}: {src.get(key) or owner['states', name]}와 {who}가 다르게 정한다")
                 else:
                     st[key], src[key] = val, who
@@ -220,7 +229,7 @@ def _line(k, v):
 
 def dumps(cfg, head=""):
     """config.toml이나 part.toml 글. 밑줄로 시작하는 키는 쓰지 않는다"""
-    arrays = ("stages", "insert", "attach")
+    arrays = ("stages", "guard", "insert", "attach")
     out = [head.rstrip("\n")] if head else []
     out += [_line(k, v) for k, v in cfg.items() if k not in (*SETTINGS, *TABLES, *arrays) and not k.startswith("_")]
     for table in SETTINGS:

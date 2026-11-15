@@ -20,6 +20,10 @@ tests = ["evals/*", "tests/*"]
 tools = "Read,Grep,Glob"
 effort = "high"
 
+[records]
+index = "plans/INDEX.md"
+index_items = ["기록: 점수 변화"]
+
 [kinds.behavior]
 states = ["SPEC", "EVALSET", "IMPLEMENT", "EVAL", "RECORD", "REPLAN"]
 back = {EVAL = ["IMPLEMENT", "EVALSET", "SPEC"]}

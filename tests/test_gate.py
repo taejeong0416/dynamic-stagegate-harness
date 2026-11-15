@@ -213,7 +213,7 @@ class LintTest(Repo):
         self.assertEqual(bad, [])
         self.assertEqual(cfg["kinds"]["behavior"]["states"][-4:], ["EVAL", "REVIEW", "RECORD", "REPLAN"])
         self.assertEqual(cfg["kinds"]["behavior"]["back"]["REVIEW"], ["IMPLEMENT", "EVALSET", "SPEC"])
-        self.assertEqual(cfg["states"]["EVAL"]["checks"][0], {"check": "run_record"})
+        self.assertEqual(cfg["states"]["EVAL"]["checks"][0], {"check": "run_record", "part": "run-record"})
 
     def test_검토자_추론_단계는_claude가_받는_값만_쓴다(self):
         self.setup_harness()
@@ -227,7 +227,8 @@ class LintTest(Repo):
         self.setup_harness()
         text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
         text = text.replace("[kinds.chore]", '[kinds.broken]\nstates = ["NOPE"]\n\n[kinds.chore]')
-        text = text.replace('{check = "filled", section = "범위 밖"},', '{check = "filled"},\n  {check = "commit_since"},')
+        text = text.replace('{check = "filled", section = "범위 밖", part = "feature"},',
+                            '{check = "filled"},\n  {check = "commit_since"},')
         self.write("bad.toml", text)
         r = self.gate("lint", "--file", "bad.toml")
         self.assertEqual(r.returncode, 1)
@@ -349,9 +350,9 @@ class FlowTest(Repo):
         self.git("commit", "-qm", "feat: a")
         for _ in range(2):
             self.assertEqual(self.gate("next", "P001").returncode, 0)
-            self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "w").returncode, 0)
+            self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "w", "--defect", "plan").returncode, 0)
         self.assertEqual(self.gate("next", "P001").returncode, 0)
-        r = self.gate("back", "P001", "IMPLEMENT", "--why", "w")
+        r = self.gate("back", "P001", "IMPLEMENT", "--why", "w", "--defect", "plan")
         self.assertIn("3번 들어왔다", r.stderr)
 
     def test_종류의_상한을_벗어나면_커밋과_next를_막는다(self):
@@ -401,9 +402,9 @@ class FlowTest(Repo):
         self.assertIn("VERIFY -.-> FIX", self.gate("describe", "--mermaid").stdout)
         self.bugfix_to_fix()
         self.assertEqual(self.gate("next", "P001").returncode, 0)
-        r = self.gate("back", "P001", "REPRO", "--why", "w")
+        r = self.gate("back", "P001", "REPRO", "--why", "w", "--defect", "plan")
         self.assertIn("VERIFY에서는 FIX로만 돌아갈 수 있다", r.stderr)
-        self.assertEqual(self.gate("back", "P001", "FIX", "--why", "덜 고침").returncode, 0)
+        self.assertEqual(self.gate("back", "P001", "FIX", "--why", "덜 고침", "--defect", "plan").returncode, 0)
         self.assertIn("| bugfix | VERIFY | FIX | 1 | 덜 고침 |", self.gate("diagnose").stdout)
 
     def test_실패해야_하는_명령이_테스트를_돌리지_못하면_막는다(self):
@@ -439,11 +440,11 @@ class FlowTest(Repo):
 
     def test_gate_run_뒤에는_back으로_다시_넘겨도_unchanged_기준이_그대로다(self):
         self.runx()
-        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "실행 전").returncode, 0)
+        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "실행 전", "--defect", "plan").returncode, 0)
         self.edit("plans/P001.md", ("| src/a.py | 새 파일 |", "| src/a.py | 새 파일, 설명 고침 |"))
         self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
         self.assertEqual(self.gate("run", "P001", "--eta", "23:59", "--basis", "b").returncode, 0)
-        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "결과를 봄").returncode, 0)
+        self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "결과를 봄", "--defect", "plan").returncode, 0)
         self.edit("plans/P001.md", ("| src/a.py | 새 파일, 설명 고침 |", "| src/a.py | 결과 뒤 고침 |"))
         self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
         r = self.gate("next", "P001")
@@ -488,7 +489,7 @@ class FlowTest(Repo):
         r = self.git("commit", "-qm", "feat: a")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("P001 t: RECORD", self.gate("next", "P001").stdout)  # v1의 files_section과 code로 파일을 찾는다
-        self.gate("back", "P001", "IMPLEMENT", "--why", "w")  # v1의 max_visits 3이라 한 번 더 들어올 수 있다
+        self.gate("back", "P001", "IMPLEMENT", "--why", "w", "--defect", "plan")  # v1의 max_visits 3이라 한 번 더 들어올 수 있다
         self.assertIn("P001 t: IMPLEMENT", self.gate("status").stdout)
 
     def test_엔진이_바뀐_진행_중_계획을_알리고_update가_경고한다(self):
@@ -516,6 +517,222 @@ class FlowTest(Repo):
         r = self.gate("next", "P001")
         self.assertEqual(r.returncode, 1)
         self.assertIn("`git grep -q zzz -- src/a.py`가 통과해야 하는데", r.stdout)
+
+
+class RecordTest(Repo):
+    """닫힌 계획 보관과 색인, 사고 기록과 성적, 부품이 더하는 검사와 막을 명령"""
+
+    def setUp(self):
+        super().setUp()
+        self.setup_harness()
+
+    def commit(self, msg, *paths):
+        self.git("add", *paths)
+        r = self.git("commit", "-qm", msg)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def chore(self, n, note="x"):
+        """chore 계획 하나를 quick으로 시작해 끝낸다"""
+        pid = f"P{n:03d}"
+        self.assertIn(f"{pid} c{n}: RECORD", self.gate("start", "--kind", "chore", "--title", f"c{n}", "--with", "quick").stdout)
+        self.edit(f"plans/{pid}.md", ("- 바뀐 동작:", f"- 바뀐 동작: {note}"), ("- 문서 영향:", "- 문서 영향: 없음"),
+                  ("- 남은 일:", "- 남은 일: 없음"))
+        r = self.gate("next", pid)
+        self.assertIn("모든 상태를 지났다", r.stdout, r.stdout + r.stderr)
+        return r
+
+    def events(self):
+        f = self.root / ".git" / "gate-events.jsonl"
+        return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
+
+    def test_닫힌_계획은_색인에_남고_오래된_것은_보관_파일로_옮긴다(self):
+        self.edit(".gate/config.toml", ('index = "plans/INDEX.md"', 'index = "plans/INDEX.md"\nkeep_closed = 2'))
+        self.commit("harness: keep", ".gate/config.toml")
+        self.chore(1, "첫째")
+        self.chore(2)
+        self.assertIn("닫힌 계획 P001를 .gate/state-archive.jsonl로 옮겼다", self.chore(3).stdout)
+        state = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(state["plans"]), ["P002", "P003"])
+        index = (self.root / "plans" / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("| P001 | c1 | chore | 끝남 |", index)
+        self.assertIn("| 첫째 |", index)
+        self.assertIn("P004 n: RECORD", self.gate("start", "--kind", "chore", "--title", "n", "--with", "quick",
+                                                  "--from", "P001").stdout)
+        diag = self.gate("diagnose").stdout
+        self.assertIn("보관한 계획 1개", diag)
+        self.assertIn("| chore | RECORD | 4 |", diag)
+
+    def test_back은_결함_분류를_받아_사고로_남기고_잡는_부품이_없으면_생성을_제안한다(self):
+        for n in (1, 2):
+            self.gate("start", "--kind", "bugfix", "--title", f"b{n}")
+            self.assertIn("--defect", self.gate("back", f"P00{n}", "REPRO", "--why", "w").stderr)
+        state = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))
+        self.assertNotIn("incidents", state)
+        r = self.gate("incident", "--defect", "env", "--plan", "P001", "--state", "VERIFY", "--note", "서버 파이썬 버전이 달랐다")
+        self.assertIn("사고 I001(env)", r.stdout)
+        self.gate("incident", "--defect", "env", "--plan", "P002", "--note", "CI 환경 변수가 빠졌다")
+        self.gate("incident", "--defect", "logic", "--plan", "P002", "--note", "경계값을 놓쳤다")
+        diag = self.gate("diagnose").stdout
+        self.assertIn("| I001 | env | P001 | VERIFY | result | 서버 파이썬 버전이 달랐다 |", diag)
+        self.assertIn("- 생성: 결함 분류 env(실행 환경)가 계획 P001, P002에서 나왔는데 이 분류를 잡는 부품이 없다(사고 I001, I002)", diag)
+        self.assertIn("- 강화: diff-review(잡으려는 분류 logic)를 쓰는데 그 분류의 결함이 1번 나왔다(사고 I003)", diag)
+        self.assertIn("| diff-review | 0 | 0 | 0 | 0 | I003 |", diag)
+
+    def test_incident의_quote는_이번_턴_사용자_입력에_있어야_한다(self):
+        log = self.root / "t.jsonl"
+        log.write_text(json.dumps({"type": "user", "message": {"content": "그 실험은 누수가 있었어"}}) + "\n", encoding="utf-8")
+        cmd = 'python -X utf8 .gate/gate.py incident --defect data --note "누수가 있었다" --quote "{}"'
+        ask = lambda q: run([*PY, str(PLUGIN / "hooks" / "run.py"), "guard"], self.root,
+                            json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd.format(q)},
+                                        "transcript_path": str(log)}), ENV | {"CLAUDE_PROJECT_DIR": str(self.root)}).stdout
+        self.assertEqual(ask("누수가 있었어").strip(), "")
+        self.assertIn("이번 턴 사용자 입력에 없다", ask("전부 틀렸어"))
+
+    def test_막힌_뒤_구조가_그대로인_채_통과하면_진짜_막힘이고_부품별로_모인다(self):
+        self.gate("start", "--kind", "chore", "--title", "c", "--with", "quick")
+        self.assertEqual(self.gate("next", "P001").returncode, 1)
+        ev = self.events()
+        self.assertEqual([(e["kind"], e["part"], e["v"]) for e in ev], [("next", "feature", 1)] * 3)
+        self.edit("plans/P001.md", ("- 바뀐 동작:", "- 바뀐 동작: x"), ("- 문서 영향:", "- 문서 영향: 없음"),
+                  ("- 남은 일:", "- 남은 일: 없음"))
+        self.gate("next", "P001")
+        self.assertIsNotNone(self.guard("Write", file_path=str(self.root / "src" / "a.py")))
+        self.assertIsNone(self.guard("Write", file_path=str(self.root / "docs" / "a.md")))
+        diag = self.gate("diagnose").stdout
+        self.assertIn("| feature | 3 | 3 | 0 | 0 | 0 |", diag)
+        self.assertIn("| 엔진 | 1 | 0 | 0 | 1 | 0 |", diag)
+        # 막혔던 편집이 구조가 바뀐 뒤에 통과하면 오탐이다
+        self.gate("start", "--kind", "chore", "--title", "d")
+        self.edit("plans/P002.md", ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | x |"))
+        self.edit(".gate/config.toml", ("version = 1", "version = 2"))
+        shutil.copy2(self.root / ".gate" / "config.toml", self.root / "v1.toml")
+        (self.root / ".gate" / "history").mkdir()
+        self.edit("v1.toml", ("version = 2", "version = 1"))
+        shutil.move(self.root / "v1.toml", self.root / ".gate" / "history" / "v1.toml")
+        self.assertIsNone(self.guard("Write", file_path=str(self.root / "src" / "a.py")))
+        self.assertIn("| 엔진 | 1 | 0 | 1 | 0 | 0 |", self.gate("diagnose").stdout)
+
+    def test_막힌_기록이_상한을_넘으면_성적으로_접는다(self):
+        self.edit(".gate/config.toml", ('index = "plans/INDEX.md"', 'index = "plans/INDEX.md"\nevents_keep = 2'))
+        self.gate("start", "--kind", "chore", "--title", "c", "--with", "quick")
+        self.gate("next", "P001")
+        self.gate("next", "P001")
+        self.assertEqual(len(self.events()), 6)
+        out = self.gate("diagnose").stdout
+        self.assertIn("막힌 기록 4줄을 .gate/scorecard.json으로 접었다", out)
+        self.assertEqual(len(self.events()), 2)
+        self.assertIn("| feature | 6 | 0 | 0 | 6 | 0 |", out)
+
+    def test_부품의_checks_모듈과_막을_명령이_제안서로_들어간다(self):
+        self.fake_reviewer()
+        self.git("checkout", "-q", ".gate/config.toml")
+        self.gate("propose", "H001")
+        d = ".gate/proposals/H001/parts/no-todo/"
+        self.write(d + "part.toml", 'name = "no-todo"\ndescription = "기록에 TODO를 남기지 않는다"\nversion = 1\n'
+                   'origin = "project"\ncovers = ["plan"]\nprovenance = {incident = "I001"}\n\n[[attach]]\nroles = ["record"]\n'
+                   'checks = [\n  {check = "no_todo", section = "기록"},\n]\n\n[[guard]]\npattern = "\\\\bpgrep\\\\b"\n'
+                   'reason = "pgrep으로 기다리지 않는다"\n')
+        self.write(d + "checks.py", "from gatekit.checks import check, sec\n\n\n@check\ndef no_todo(ctx, spec):\n"
+                   "    return [\"기록에 TODO가 남았다\"] if any(\"TODO\" in x for x in sec(ctx, spec)) else []\n")
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| no-todo 부품 | I001 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        r = self.gate("check-proposal", "H001", "--review")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("- 더함: no-todo", (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.gate("adopt", "H001", "--approved", "적용해").returncode, 0)
+        self.assertEqual(self.gate("lint").returncode, 0, self.gate("lint").stdout)
+        self.assertEqual(self.guard("Bash", command="pgrep -f train"), "pgrep으로 기다리지 않는다")
+        self.assertEqual(self.events()[-1]["part"], "no-todo")
+        self.gate("start", "--kind", "chore", "--title", "c")
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | x |"),
+                  ("- 바뀐 동작:", "- 바뀐 동작: TODO"), ("- 문서 영향:", "- 문서 영향: 없음"), ("- 남은 일:", "- 남은 일: 없음"))
+        self.write("src/a.py", "x = 2\n")
+        self.commit("feat: a", "src", "plans")
+        self.assertIn("P001 c: RECORD", self.gate("next", "P001").stdout)
+        self.assertIn("기록에 TODO가 남았다", self.gate("next", "P001").stdout)
+        self.assertIn("| no-todo | 2 | 0 | 0 | 2 | 0 |", self.gate("diagnose").stdout)
+
+    def test_제안서_진단이_끝난_계획에_새_검사를_돌려_새로_막히는_계획을_보인다(self):
+        self.git("checkout", "-q", ".gate/config.toml")
+        self.gate("start", "--kind", "chore", "--title", "c")
+        self.edit("plans/P001.md", ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | x |"),
+                  ("- 바뀐 동작:", "- 바뀐 동작: x"), ("- 문서 영향:", "- 문서 영향: 없음"), ("- 남은 일:", "- 남은 일: 없음"))
+        self.write("src/a.py", "x = 2\n")
+        self.commit("feat: a", "src", "plans")
+        self.gate("next", "P001")
+        self.gate("next", "P001")
+        self.gate("incident", "--defect", "plan", "--plan", "P001", "--note", "변경 파일 표가 한 줄뿐이었다")
+        self.gate("propose", "H001")
+        self.edit(".gate/proposals/H001/parts/feature/part.toml",
+                  ('  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"]},\n',
+                   '  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"]},\n'
+                   '  {check = "table", section = "변경 파일", min_rows = 2, only = ["chore"]},\n'))
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| 표 두 줄 | I001 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        self.gate("check-proposal", "H001")
+        diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        self.assertIn("- P001 (chore, 사고 I001): 새로 막힘 [\"RECORD: '변경 파일' 절 표에 칸이 모두 찬 행이 2개 이상 있어야 한다"
+                      "(지금 1개)\"], 더는 막히지 않음 없음", diag)
+
+
+class TidyTest(Repo):
+    """ml 조합의 정리 경로. 정리 전에 풀리던 참조와 항목 ID가 정리 뒤에도 남아야 한다"""
+
+    def test_정리는_풀리던_참조와_항목을_잃으면_막고_상한을_넘으면_권한다(self):
+        self.write("in.toml", '[answers]\nwork = "experiment"\nrun = "remote"\nships = "yes"\nfailure_cost = "time"\n\n'
+                   '[records]\ncurrent_max = 120\nitem_id = "\\\\[(S\\\\d{3})\\\\]"\n')
+        self.assertEqual(self.install("--local", "in.toml").returncode, 0)
+        self.git("add", ".gate", ".githooks")
+        self.git("reset", "-q", ".gate/state.json")
+        self.git("commit", "-qm", "harness: install")
+        self.write("experiments/log.csv", "id,score\nE001,0.5\nE002,0.6\n")
+        self.write("progress/status.md", "---\n다음 실험: E003\n---\n\n## 단계\n\n0단계\n\n## 열린 질문\n\n"
+                   "- [S001] E001이 왜 낮은가(끝남, E002에서 확인)\n- [S002] 다음 feature\n\n## 다음에 볼 것\n\n- E002 재현\n")
+        self.write("progress/history.md", "# 경과\n")
+        self.git("add", "experiments", "progress", ".gate/state.json")
+        self.git("commit", "-qm", "docs: 기록")
+        out = self.gate("records").stdout
+        self.assertIn("항목 ID 2개", out)
+        self.assertIn("풀리는 참조: 2개", out)
+        self.assertIn("progress/status.md가", out)
+        r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "session"], self.root, "{}", ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("progress/status.md 머리: 다음 실험 E003", ctx)
+        self.assertIn("[기록 정리 권장] progress/status.md가", ctx)
+        self.assertIn("P001 t: SURVEY", self.gate("start", "--kind", "tidy", "--title", "t").stdout)  # 단계와 관계없이 시작한다
+        self.edit("experiments/plans/P001.md", ("- 정리 전 크기:", "- 정리 전 크기: 150자"), ("- 옮길 항목:", "- 옮길 항목: S001"))
+        self.assertIn("P001 t: TIDY", self.gate("next", "P001").stdout)
+        # 항목을 지우기만 하고 실험 기록의 행도 지웠다
+        self.write("progress/status.md", "---\n다음 실험: E003\n---\n\n## 단계\n\n0단계\n\n## 열린 질문\n\n- [S002] 다음 feature\n\n"
+                   "## 다음에 볼 것\n\n- E002 재현\n")
+        self.write("experiments/log.csv", "id,score\nE002,0.6\n")
+        self.edit("experiments/plans/P001.md", ("- 옮긴 항목:", "- 옮긴 항목: S001"))
+        self.assertIn("P001 t: CONFIRM", self.gate("next", "P001").stdout)
+        out = self.gate("next", "P001").stdout
+        self.assertIn("정리 전에 풀리던 참조 E001가 풀리지 않는다", out)
+        self.assertIn("정리 전 progress/status.md에 있던 항목 S001가 progress/status.md에도 progress/history.md에도 없다", out)
+        self.write("experiments/log.csv", "id,score\nE001,0.5\nE002,0.6\n")
+        self.write("progress/history.md", "# 경과\n\n- [S001] E001이 왜 낮은가(끝남, E002에서 확인)\n")
+        self.assertIn("모든 상태를 지났다", self.gate("next", "P001").stdout)
+        self.assertIn("| P001 | t | tidy | 끝남 |", (self.root / "experiments" / "plans" / "INDEX.md").read_text(encoding="utf-8"))
+
+    def test_field_검사는_머리_필드가_기록의_마지막_번호_다음인지_본다(self):
+        self.install("service")
+        self.edit(".gate/config.toml",
+                  ('  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"], part = "feature"},\n',
+                   '  {check = "field", path = "docs/status.md", field = "다음 실험", '
+                   'after_last = {file = "log.csv", pattern = "E(\\\\d{3})"}},\n'),
+                  ('[kinds.chore]\nstates = ["IMPLEMENT", "RECORD"]', '[kinds.chore]\nstates = ["RECORD"]'))
+        self.git("add", ".gate", ".githooks")
+        self.git("reset", "-q", ".gate/state.json")
+        self.git("commit", "-qm", "harness: install")
+        self.write("log.csv", "E001\nE007\n")
+        self.gate("start", "--kind", "chore", "--title", "c")
+        self.assertIn("docs/status.md 머리의 '다음 실험' 필드가 비었다", self.gate("next", "P001").stdout)
+        self.write("docs/status.md", "---\n다음 실험: E007\n---\n")
+        self.assertIn("'다음 실험'가 E007인데, log.csv의 마지막 번호 다음은 8다", self.gate("next", "P001").stdout)
+        self.write("docs/status.md", "---\n다음 실험: E008\n---\n")
+        self.assertIn("모든 상태를 지났다", self.gate("next", "P001").stdout)
 
 
 class FeatureTest(Repo):
@@ -562,9 +779,9 @@ class FeatureTest(Repo):
         diff = (self.root / ".git" / "gate-review" / "P001.diff").read_text(encoding="utf-8")
         self.assertIn("+ok = 1", diff)
         self.assertIn("# 표에 있는데 바뀌지 않은 파일: 없음", diff)
-        self.gate("back", "P001", "REVIEW", "--why", "w")
+        self.gate("back", "P001", "REVIEW", "--why", "w", "--defect", "plan")
         self.assertIn("P001 f: RECORD", self.gate("next", "P001").stdout)  # 코드가 그대로면 앞 검토를 쓴다
-        self.gate("back", "P001", "IMPLEMENT", "--why", "w")
+        self.gate("back", "P001", "IMPLEMENT", "--why", "w", "--defect", "plan")
         self.write("src/a.py", "ok = 2\n")
         self.commit("feat: ok 2", "src")
         self.assertIn("P001 f: TEST", self.gate("next", "P001").stdout)
@@ -598,7 +815,7 @@ class FeatureTest(Repo):
         spec = next(c["args"] for c in self.calls() if "'요구사항', '수용 기준', '범위 밖' 절을 검토한다" in c["prompt"])
         for flag in ("--model sonnet", "--effort high", "--strict-mcp-config", "--disable-slash-commands"):
             self.assertIn(flag, " ".join(spec))
-        self.gate("back", "P001", "SPEC", "--why", "w")
+        self.gate("back", "P001", "SPEC", "--why", "w", "--defect", "plan")
         self.edit("plans/P001.md", ("ok를 둔다.", "ok를 1로 둔다."))
         self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
         rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
@@ -676,7 +893,7 @@ class FeatureTest(Repo):
 
     def test_먼저_쓴_테스트를_고치면_표에_적어야_하고_구현한_뒤에도_TESTFIRST를_다시_지난다(self):
         self.feature_to_test()
-        self.gate("back", "P001", "PLAN", "--why", "w")
+        self.gate("back", "P001", "PLAN", "--why", "w", "--defect", "plan")
         self.assertIn("P001 f: TESTFIRST", self.gate("next", "P001", "--review").stdout)
         self.assertIn("P001 f: IMPLEMENT", self.gate("next", "P001").stdout)  # 같은 테스트로 실패를 확인했다
         self.write("tests/expect.txt", "o\n")
@@ -686,7 +903,7 @@ class FeatureTest(Repo):
         self.assertIn("tests/expect.txt는 TESTFIRST를 넘긴 뒤 고치거나 지운 테스트 파일이다", r.stdout)
         self.edit("plans/P001.md", ("| 파일 | 고친 이유 |\n|---|---|", "| 파일 | 고친 이유 |\n|---|---|\n| tests/expect.txt | 패턴을 줄임 |"))
         self.assertIn("P001 f: REVIEW", self.gate("next", "P001").stdout)
-        self.gate("back", "P001", "PLAN", "--why", "w")
+        self.gate("back", "P001", "PLAN", "--why", "w", "--defect", "plan")
         self.gate("next", "P001", "--review")
         r = self.gate("next", "P001")  # 테스트가 바뀌어 실패를 다시 확인해야 한다
         self.assertIn("실패해야 하는데 종료 코드가 0", r.stdout)

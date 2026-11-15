@@ -1,0 +1,57 @@
+name = "cleanup"
+description = "기록 정리 경로(tidy). 현재 상태 문서의 닫힌 항목을 보관 문서로 옮기고, 정리 전에 풀리던 참조가 그대로 풀리는지 확인한다"
+version = 1
+origin = "library"
+applies_when = {answer = {work = "experiment"}}
+
+[project]
+unreviewed = ["측정", "정리"]
+
+[kinds.tidy]
+states = ["SURVEY", "TIDY", "CONFIRM"]
+back = {CONFIRM = ["TIDY"]}
+any_stage = true
+
+[sections."측정"]
+body = """
+- 정리 전 크기:
+- 옮길 항목:
+"""
+
+[sections."정리"]
+body = """
+- 옮긴 항목:
+- 대체 표시를 붙인 결정:
+"""
+
+[states.SURVEY]
+sections = ["측정"]
+todo = [
+  "python -X utf8 .gate/gate.py records를 돌려 현재 상태 문서, 보관 문서, 상태 파일의 크기를 \"정리 전 크기\"에 옮겨 쓴다.",
+  "현재 상태 문서에서 닫힌 항목(끝난 일, 답이 나온 질문, 지나간 경과)을 찾아 \"옮길 항목\"에 쓴다.",
+]
+checks = [
+  {check = "filled", section = "측정", items = ["정리 전 크기", "옮길 항목"]},
+  {check = "survey"},
+]
+
+[states.TIDY]
+sections = ["정리"]
+todo = [
+  "닫힌 항목을 현재 상태 문서에서 보관 문서([records] archive_file)로 옮긴다. 문장을 고치지 않고 그대로 옮긴다.",
+  "바뀐 결정이 있으면 결정 문서의 옛 항목에 대체한 항목의 제목을 적는다. 실험 기록과 결정 문서의 행은 지우지 않는다.",
+  "\"정리\" 절에 옮긴 항목과 대체 표시를 붙인 결정을 쓰고 커밋한다.",
+]
+checks = [
+  {check = "filled", section = "정리", items = ["옮긴 항목"]},
+]
+
+[states.CONFIRM]
+todo = [
+  "next로 확인한다. 정리 전에 풀리던 참조와 항목 ID가 모두 남아 있고 현재 상태 문서가 상한 안이어야 넘어간다.",
+  "막히면 TIDY로 back해서 빠진 내용을 되살린다.",
+]
+checks = [
+  {check = "kept"},
+  {check = "doc_size"},
+]

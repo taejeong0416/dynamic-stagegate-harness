@@ -25,6 +25,12 @@ tools = "Read,Grep,Glob"
 effort = "high"
 cite = ["E\\d{3}"]
 
+[records]
+archive_file = "progress/history.md"
+index = "experiments/plans/INDEX.md"
+index_items = ["기록: log.csv 행", "결정: 고른 갈래"]
+ledgers = ["experiments/log.csv", "progress/decisions.md"]
+
 [kinds.new]
 states = ["RESEARCH", "IDEATE", "SELECT", "PLAN", "IMPLEMENT", "RUN", "RECORD", "REPLAN"]
 back = {RUN = ["IMPLEMENT", "PLAN"]}
@@ -206,6 +212,7 @@ checks = [
   {check = "unchanged", state = "PLAN", sections = ["비교 기준", "결과별 다음 행동"], skip = ["eda"]},
   {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖"},
   {check = "commit_since", path = "progress/status.md", mention = true},
+  {check = "doc_size"},
 ]
 
 [[attach]]

@@ -32,7 +32,8 @@ DEFAULTS = {
                 ".gate/parts/", ".gate/local.toml", ".gate/parts.lock", ".gate/GATE.md", ".githooks/"],
     # 에이전트가 편집 도구나 셸로 직접 쓰지 못하는 파일. 구조는 제안서와 gate adopt로만 바꾼다
     "protected": [".gate/config.toml", ".gate/history/", ".gate/gatekit/", ".gate/gate.py", ".gate/parts/",
-                  ".gate/local.toml", ".gate/parts.lock", ".githooks/"],
+                  ".gate/local.toml", ".gate/parts.lock", ".gate/state-archive.jsonl", ".gate/scorecard.json",
+                  ".githooks/"],
     "harness_prefix": "harness:",
     "max_visits": 3,
     "files_section": "변경 파일",
@@ -58,7 +59,8 @@ def parse_config(text):
     return {"version": raw.get("version", 1), "project": DEFAULTS | raw.get("project", {}),
             "kinds": raw.get("kinds", {}), "states": raw.get("states", {}), "sections": raw.get("sections", {}),
             "stages": raw.get("stages", []), "remote": raw.get("remote", {}),
-            "review": {"context_full": 6000} | raw.get("review", {})}
+            "review": {"context_full": 6000} | raw.get("review", {}), "records": raw.get("records", {}),
+            "guard": raw.get("guard", [])}
 
 
 CFG = parse_config((GATE_DIR / "config.toml").read_text(encoding="utf-8"))
@@ -156,8 +158,9 @@ def next_state(cfg, p, s, after):
 def log_event(kind, reason, **extra):
     try:
         with open(git_path("gate-events.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200], **extra},
-                               ensure_ascii=False) + "\n")
+            # v와 engine은 막힌 뒤 구조나 엔진이 바뀌었는지 가리는 데 쓴다(score.verdicts)
+            f.write(json.dumps({"at": now(), "ts": time.time(), "kind": kind, "reason": reason[:200],
+                                "v": CFG["version"], "engine": ENGINE, **extra}, ensure_ascii=False) + "\n")
     except OSError:
         pass
 

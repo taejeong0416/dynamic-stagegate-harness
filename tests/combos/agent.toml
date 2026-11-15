@@ -17,6 +17,10 @@ tests = ["evals/*", "tests/*"]
 tools = "Read,Grep,Glob"
 effort = "high"
 
+[records]
+index = "plans/INDEX.md"
+index_items = ["기록: 점수 변화"]
+
 [kinds.bugfix]
 states = ["REPRO", "FIX", "VERIFY", "RECORD"]
 back = {VERIFY = ["FIX", "REPRO"]}
@@ -106,9 +110,9 @@ todo = [
   "실패를 재현하는 테스트나 eval 케이스를 쓰고 \"변경 파일\" 표에 넣은 뒤 커밋한다.",
 ]
 checks = [
-  {check = "filled", section = "재현", items = ["증상", "재현 명령"]},
-  {check = "clean"},
-  {check = "command", section = "재현", item = "재현 명령", expect = "fail"},
+  {check = "filled", section = "재현", items = ["증상", "재현 명령"], part = "bugfix"},
+  {check = "clean", part = "bugfix"},
+  {check = "command", section = "재현", item = "재현 명령", expect = "fail", part = "bugfix"},
 ]
 
 [states.FIX]
@@ -120,12 +124,12 @@ todo = [
   "고치고 커밋한다. 재현 명령이 통과해야 넘어간다. REPRO에서 쓴 테스트나 케이스를 고치면 \"테스트 수정\" 표에 파일과 이유를 쓴다.",
 ]
 checks = [
-  {check = "filled", section = "원인"},
-  {check = "clean"},
-  {check = "files_changed", any = true},
-  {check = "test_edits", state = "REPRO", section = "테스트 수정"},
-  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
-  {check = "command", section = "재현", item = "재현 명령"},
+  {check = "filled", section = "원인", part = "bugfix"},
+  {check = "clean", part = "bugfix"},
+  {check = "files_changed", any = true, part = "bugfix"},
+  {check = "test_edits", state = "REPRO", section = "테스트 수정", part = "bugfix"},
+  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"], part = "bugfix"},
+  {check = "command", section = "재현", item = "재현 명령", part = "bugfix"},
 ]
 roles = ["implement"]
 
@@ -133,8 +137,8 @@ roles = ["implement"]
 sections = ["검증"]
 todo = ["전체 테스트나 eval 명령([project] test, 비었으면 \"검증\" 절의 테스트 명령)을 돌리고 결과를 쓴다."]
 checks = [
-  {check = "filled", section = "검증", items = ["결과"]},
-  {check = "command", use = "test", section = "검증", item = "테스트 명령"},
+  {check = "filled", section = "검증", items = ["결과"], part = "bugfix"},
+  {check = "command", use = "test", section = "검증", item = "테스트 명령", part = "bugfix"},
 ]
 roles = ["verify"]
 
@@ -142,7 +146,7 @@ roles = ["verify"]
 sections = ["기록"]
 todo = ["\"기록\" 절에 바뀐 동작, 점수 변화, 남은 실패 사례를 쓴다.", "프롬프트나 도구 문서에 영향이 있으면 고쳐 커밋한다."]
 checks = [
-  {check = "filled", section = "기록", items = ["바뀐 동작", "점수 변화", "남은 실패 사례"]},
+  {check = "filled", section = "기록", items = ["바뀐 동작", "점수 변화", "남은 실패 사례"], part = "eval"},
 ]
 roles = ["record"]
 
@@ -155,9 +159,9 @@ todo = [
   "커밋한다.",
 ]
 checks = [
-  {check = "files_listed"},
-  {check = "clean"},
-  {check = "files_changed", any = true},
+  {check = "files_listed", part = "eval"},
+  {check = "clean", part = "eval"},
+  {check = "files_changed", any = true, part = "eval"},
 ]
 roles = ["implement"]
 
@@ -169,11 +173,12 @@ todo = [
   "next P### --review로 검토자를 부른다.",
 ]
 checks = [
-  {check = "filled", section = "목표 동작"},
-  {check = "table", section = "결과별 다음 행동", min_rows = 2},
+  {check = "filled", section = "목표 동작", part = "eval"},
+  {check = "table", section = "결과별 다음 행동", min_rows = 2, part = "eval"},
 ]
 review = "{plan}의 '목표 동작'과 '결과별 다음 행동'을 검토한다. 저장소의 프롬프트, 도구 정의, evals/를 읽는다. 다음을 찾는다. (1) eval로 확인할 수 없는 목표 동작 (2) 지금 프롬프트나 도구와 어긋나는 목표 (3) 수치 경계가 없거나 겹치는 결과별 다음 행동."
 review_model = "sonnet"
+review_part = "eval"
 
 [states.EVALSET]
 code = true
@@ -185,11 +190,11 @@ todo = [
   "케이스와 계획 파일을 커밋한다. 케이스는 구현 전에 고정한다.",
 ]
 checks = [
-  {check = "files_listed"},
-  {check = "filled", section = "평가", items = ["eval 명령", "케이스 파일", "지금 점수", "합격 기준", "결과 파일"]},
-  {check = "paths_exist", section = "평가", items = ["케이스 파일"], required = true},
-  {check = "clean"},
-  {check = "files_changed", any = true},
+  {check = "files_listed", part = "eval"},
+  {check = "filled", section = "평가", items = ["eval 명령", "케이스 파일", "지금 점수", "합격 기준", "결과 파일"], part = "eval"},
+  {check = "paths_exist", section = "평가", items = ["케이스 파일"], required = true, part = "eval"},
+  {check = "clean", part = "eval"},
+  {check = "files_changed", any = true, part = "eval"},
 ]
 
 [states.EVAL]
@@ -200,14 +205,14 @@ todo = [
   "\"평가 결과\" 표에 케이스 묶음마다 바꾸기 전 점수와 바꾼 뒤 점수를 쓴다.",
 ]
 checks = [
-  {check = "clean"},
-  {check = "code_unchanged"},
-  {check = "unchanged", state = "EVALSET", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["behavior"]},
-  {check = "unchanged", state = "PLAN", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["prompt"]},
-  {check = "test_edits", state = "EVALSET", section = "테스트 수정", only = ["behavior"]},
-  {check = "test_edits", section = "테스트 수정", only = ["prompt"]},
-  {check = "results", section = "평가", item = "결과 파일"},
-  {check = "table", section = "평가 결과"},
+  {check = "clean", part = "eval"},
+  {check = "code_unchanged", part = "eval"},
+  {check = "unchanged", state = "EVALSET", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["behavior"], part = "eval"},
+  {check = "unchanged", state = "PLAN", section = "평가", items = ["eval 명령", "케이스 파일", "합격 기준"], only = ["prompt"], part = "eval"},
+  {check = "test_edits", state = "EVALSET", section = "테스트 수정", only = ["behavior"], part = "eval"},
+  {check = "test_edits", section = "테스트 수정", only = ["prompt"], part = "eval"},
+  {check = "results", section = "평가", item = "결과 파일", part = "eval"},
+  {check = "table", section = "평가 결과", part = "eval"},
 ]
 roles = ["execute", "verify"]
 
@@ -218,10 +223,10 @@ todo = [
   "어느 갈래에도 맞지 않으면 \"고른 갈래\"에 \"예상 밖\"을 쓰고 start --from P###로 원인을 찾는 계획을 시작한다.",
 ]
 checks = [
-  {check = "filled", section = "결정", items = ["고른 갈래", "다음 계획"]},
-  {check = "unchanged", state = "SPEC", sections = ["결과별 다음 행동"], only = ["behavior"]},
-  {check = "unchanged", state = "PLAN", sections = ["결과별 다음 행동"], only = ["prompt"]},
-  {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖"},
+  {check = "filled", section = "결정", items = ["고른 갈래", "다음 계획"], part = "eval"},
+  {check = "unchanged", state = "SPEC", sections = ["결과별 다음 행동"], only = ["behavior"], part = "eval"},
+  {check = "unchanged", state = "PLAN", sections = ["결과별 다음 행동"], only = ["prompt"], part = "eval"},
+  {check = "choice", section = "결정", item = "고른 갈래", options = "결과별 다음 행동", escape = "예상 밖", part = "eval"},
 ]
 roles = ["decide"]
 
@@ -235,12 +240,13 @@ todo = [
   "next P### --review로 검토자를 부른다.",
 ]
 checks = [
-  {check = "filled", section = "가설"},
-  {check = "files_listed"},
-  {check = "filled", section = "평가", items = ["eval 명령", "케이스 파일", "지금 점수", "합격 기준", "결과 파일"]},
-  {check = "paths_exist", section = "평가", items = ["케이스 파일"], required = true},
-  {check = "table", section = "결과별 다음 행동", min_rows = 2},
+  {check = "filled", section = "가설", part = "eval"},
+  {check = "files_listed", part = "eval"},
+  {check = "filled", section = "평가", items = ["eval 명령", "케이스 파일", "지금 점수", "합격 기준", "결과 파일"], part = "eval"},
+  {check = "paths_exist", section = "평가", items = ["케이스 파일"], required = true, part = "eval"},
+  {check = "table", section = "결과별 다음 행동", min_rows = 2, part = "eval"},
 ]
 review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 프롬프트, 코드, eval 케이스를 읽는다. 다음을 찾는다. (1) 가설과 관계없는 변경 파일 (2) 가설을 확인하지 못하는 eval 케이스 (3) 지금 점수 없이 정한 합격 기준 (4) 수치 경계가 없거나 겹치는 결과별 다음 행동."
 review_model = "sonnet"
+review_part = "eval"
 roles = ["plan"]

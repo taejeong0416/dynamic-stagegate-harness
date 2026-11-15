@@ -45,6 +45,10 @@ tests = [
 tools = "Read,Grep,Glob"
 effort = "high"
 
+[records]
+index = "plans/INDEX.md"
+index_items = ["기록: 바뀐 동작"]
+
 [kinds.feature]
 states = ["SPEC", "PLAN", "IMPLEMENT", "TEST", "RECORD"]
 back = {TEST = ["IMPLEMENT", "PLAN", "SPEC"]}

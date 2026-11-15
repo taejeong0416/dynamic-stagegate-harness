@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import evolve
+from . import evolve, records, score
 from .checks import run_checks
 from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
                    is_harness, is_test,
@@ -75,18 +75,19 @@ def cmd_start(a, flow):
     if a.kind not in kinds:
         sys.exit(f"종류는 {', '.join(kinds)} 중 하나다")
     allowed = stage_kinds(flow)
-    if allowed is not None and a.kind not in allowed:
+    if allowed is not None and a.kind not in allowed and not kinds[a.kind].get("any_stage"):
         sys.exit(f"{flow['stage']}단계에서는 {a.kind}를 시작할 수 없다(허용: {', '.join(sorted(allowed))})")
     opts = [x for x in (a.with_ or "").replace(",", " ").split() if x]
     bad = [x for x in opts if x not in kinds[a.kind].get("options", [])]
     if bad:
         sys.exit(f"{a.kind}에서 켤 수 있는 선택은 {', '.join(kinds[a.kind].get('options', [])) or '없음'}이다(받은 것: {', '.join(bad)})")
-    if a.from_ and a.from_ not in flow["plans"]:
+    known = records.all_plans(flow)
+    if a.from_ and a.from_ not in known:
         sys.exit(f"{a.from_}가 없다")
     if not head():
         sys.exit("커밋이 하나도 없다. 설치 파일을 먼저 커밋한다")
     prefix = P["plan_prefix"]
-    nums = [int(k[len(prefix):]) for k in flow["plans"] if k.startswith(prefix) and k[len(prefix):].isdigit()]
+    nums = [int(k[len(prefix):]) for k in known if k.startswith(prefix) and k[len(prefix):].isdigit()]
     pid = f"{prefix}{max(nums + [0]) + 1:03d}"
     PLANS.mkdir(parents=True, exist_ok=True)
     plan = (PLANS / f"{pid}.md").relative_to(ROOT).as_posix()
@@ -113,9 +114,9 @@ def cmd_next(a, flow):
     miss = structure_problems(p, text)
     if not miss and limit_problem(p, s):
         miss = [limit_problem(p, s)]
+    ctx = {"pid": pid, "p": p, "text": text, "s": s, "flow": flow, "state": state, "cfg": cfg_for(p),
+           "allow_review": a.review}
     if not miss:
-        ctx = {"pid": pid, "p": p, "text": text, "s": s, "flow": flow, "state": state, "cfg": cfg_for(p),
-               "allow_review": a.review}
         miss = run_checks(ctx)
     if miss:
         save(flow)  # 검토 결과는 남긴다
@@ -123,8 +124,10 @@ def cmd_next(a, flow):
         for m in miss:
             print("  - " + m)
             if not m.startswith("검토자 호출"):  # 하네스 점검 자료. --review로 다시 부르라는 안내는 뺀다
-                log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state)
+                log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state,
+                          part=ctx.get("blame", {}).get(m, ""))
         sys.exit(1)
+    log_event("pass", "", plan=pid, state=state)  # 앞에서 막힌 기록의 판정에 쓴다
     if state not in p.get("frozen", []):  # gate run 뒤에는 앞 상태의 스냅샷을 바꾸지 않는다(unchanged가 쓴다)
         p.setdefault("passed", {})[state] = snapshot(s)
     p.setdefault("first_passed", {}).setdefault(state, head())  # back으로 지우지 않는다. test_edits가 쓴다
@@ -134,13 +137,24 @@ def cmd_next(a, flow):
         save(flow)
         sys.exit(f"{pid}가 {nxt}에 {cap}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
     nxt, skipped = advance(p, s, state, "next")
+    if nxt == "DONE":
+        closed(flow)
     save(flow)
     if skipped:
         print(f"조건이 맞지 않아 건너뜀: {', '.join(skipped)}")
     if nxt == "DONE":
         print(f"{pid} {p['title']}: 모든 상태를 지났다")
+        if records.REC["index"]:
+            print(f"  계획 색인 {records.REC['index']}에 행을 더했다. 상태 파일과 함께 커밋한다")
     else:
         show_todo(pid, p)
+
+
+def closed(flow):
+    """계획이 닫히면 오래된 닫힌 계획을 보관 파일로 옮기고 색인을 다시 쓴다"""
+    moved = records.settle(flow)
+    if moved:
+        print(f"닫힌 계획 {', '.join(moved)}를 .gate/state-archive.jsonl로 옮겼다. 상태 파일과 함께 커밋한다")
 
 
 def freeze(p):
@@ -181,11 +195,13 @@ def cmd_back(a, flow):
         sys.exit(f"{a.pid}가 {a.state}에 {cap}번 들어왔다. 사용자에게 방향을 묻고, 그만두면 abandon한다")
     if results_seen(p):  # gate run 없이 돌린 결과도 이미 나왔으면 고정한다
         freeze(p)
+    inc = score.add_incident(flow, a.defect, a.why, plan=a.pid, state=p["state"], source="back")
     for st in order[order.index(a.state):]:
         if st not in p.get("frozen", []):
             p.get("passed", {}).pop(st, None)
     enter(p, a.state, f"back: {a.why}")
     save(flow)
+    print(f"사고 {inc['id']}({a.defect})로 남겼다")
     show_todo(a.pid, p)
 
 
@@ -206,8 +222,26 @@ def cmd_abandon(a, flow):
     if not a.why.strip():
         sys.exit("--why 이유가 필요하다")
     enter(p, "ABANDONED", f"abandon: {a.why}")
+    closed(flow)
     save(flow)
     print(f"{a.pid} {p['title']}: 그만둠({a.why})")
+
+
+def cmd_incident(a, flow):
+    """통과한 뒤에 드러난 결함을 남긴다. 결과 판정이 무효이거나 사용자가 결함을 지적했을 때 쓴다"""
+    if a.plan and a.plan not in records.all_plans(flow):
+        sys.exit(f"{a.plan}가 없다")
+    if len(a.note.strip()) < 5:
+        sys.exit("--note에 무슨 결함이 어느 상태를 지나 드러났는지 쓴다")
+    quote = " ".join((a.quote or "").split())
+    inc = score.add_incident(flow, a.defect, a.note, plan=a.plan or "", state=a.state or "",
+                             source="user" if quote else "result", quote=quote)
+    save(flow)
+    print(f"사고 {inc['id']}({a.defect})를 남겼다. diagnose의 부품 성적과 제안 초안에 쓰인다")
+
+
+def cmd_records(a, flow):
+    print("\n".join(records.report(flow)))
 
 
 def cmd_hold(a, flow):
@@ -323,7 +357,10 @@ def cmd_describe(a, flow):
 
 
 def cmd_diagnose(a, flow):
+    n = score.rotate()
     print(evolve.diagnose(flow))
+    if n:
+        print(f"\n막힌 기록 {n}줄을 .gate/scorecard.json으로 접었다. 하네스 커밋과 따로 커밋한다")
     why = evolve.review_due(flow)
     if why:
         print("\n하네스 점검을 권하는 이유: " + "; ".join(why))
@@ -378,6 +415,15 @@ def main(argv=None):
     b.add_argument("pid")
     b.add_argument("state")
     b.add_argument("--why", required=True)
+    b.add_argument("--defect", required=True, choices=list(score.DEFECTS),
+                   help="되돌아가는 원인의 분류: " + ", ".join(f"{k}({v})" for k, v in score.DEFECTS.items()))
+    inc = sub.add_parser("incident")
+    inc.add_argument("--defect", required=True, choices=list(score.DEFECTS))
+    inc.add_argument("--note", required=True)
+    inc.add_argument("--plan")
+    inc.add_argument("--state", help="결함이 드러난 상태")
+    inc.add_argument("--quote", help="사용자가 이번 턴에 결함을 지적한 문장")
+    sub.add_parser("records")
     r = sub.add_parser("run")
     r.add_argument("pid")
     r.add_argument("--eta", required=True)
@@ -413,8 +459,9 @@ def main(argv=None):
     cmds = {"start": cmd_start, "next": cmd_next, "back": cmd_back, "run": cmd_run, "abandon": cmd_abandon,
             "hold": cmd_hold, "stage": cmd_stage, "status": cmd_status, "git-pre-commit": cmd_pre_commit,
             "git-commit-msg": cmd_commit_msg, "lint": cmd_lint, "describe": cmd_describe, "diagnose": cmd_diagnose,
-            "check-proposal": cmd_check_proposal, "adopt": cmd_adopt, "parts": cmd_parts, "propose": cmd_propose}
-    if a.cmd in ("status", "git-pre-commit", "git-commit-msg", "lint", "describe", "diagnose", "parts"):
+            "check-proposal": cmd_check_proposal, "adopt": cmd_adopt, "parts": cmd_parts, "propose": cmd_propose, "incident": cmd_incident,
+            "records": cmd_records}
+    if a.cmd in ("status", "git-pre-commit", "git-commit-msg", "lint", "describe", "parts", "records"):
         cmds[a.cmd](a, load())
         return
     with Lock():

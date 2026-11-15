@@ -32,6 +32,7 @@ HOOK_OFF = re.compile(r"--no-verify\b|\bgit\b[^;&|\n]*\bcommit\b[^;&|\n]*\s-[a-z
                       r"|core\.hooksPath(?!\s+\.githooks(\s|$))|disableAllHooks")
 # 커밋 메시지 인자. 메시지 속 단어를 -n으로 잘못 읽지 않게 검사 전에 뺀다
 MSG_ARG = re.compile(r"(\s(?:-[a-zA-Z]*m|--message)(?:\s+|=))(?:\"[^\"]*\"|'[^']*')")
+INCIDENT = re.compile(r"\bincident\b[^;&|\n]*?--quote\s+(?:\"([^\"]*)\"|'([^']*)')")
 ADOPT = re.compile(r"\badopt\s+(\S+)\s+--approved\s+(?:\"([^\"]*)\"|'([^']*)')")
 SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item)"
                          r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
@@ -80,12 +81,25 @@ def emit(obj):
 
 
 CMD = ""  # 막은 명령(점검 자료)
+KEY = ""  # 막은 행동의 열쇠. 같은 행동이 나중에 통과하면 판정을 붙인다
 
 
-def deny(reason):
+def pending(update=None):
+    """막힌 뒤 아직 통과하지 않은 행동의 열쇠 목록(git 폴더). update를 주면 그 목록으로 바꾼다"""
+    from .core import git_path
+    f = git_path("gate-pending.json")
+    if update is None:
+        return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    f.write_text(json.dumps(update[-200:], ensure_ascii=False), encoding="utf-8")
+
+
+def deny(reason, part=""):
     try:  # 하네스 점검 자료. 오탐을 가려낼 수 있게 명령 앞부분도 남긴다
         from .core import log_event
-        log_event("guard", reason, **({"cmd": CMD[:200]} if CMD else {}))
+        log_event("guard", reason, **({"cmd": CMD[:200]} if CMD else {}), **({"key": KEY} if KEY else {}),
+                  **({"part": part} if part else {}))
+        if KEY and KEY not in pending():
+            pending(pending() + [KEY])
     except Exception:
         pass
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -117,14 +131,27 @@ def code_gate(path, flow):
     return None
 
 
+def guard_passed():
+    """앞에서 막혔던 행동이 통과했으면 남긴다(score.verdicts가 구조와 엔진이 그대로였는지 본다)"""
+    try:
+        keys = pending()
+        if KEY and KEY in keys:
+            from .core import log_event
+            log_event("guard_pass", "", key=KEY)
+            pending([k for k in keys if k != KEY])
+    except Exception:
+        pass
+
+
 def guard(inp):
-    global CMD
+    global CMD, KEY
     from .core import (ROOT, STATE, dirty_code, exec_open, is_code_any, is_protected, load, remote_exec_paths, remote_on,
                        run_open, LAUNCH, UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
     if tool in EDIT_TOOLS:
         path = rel(ti.get("file_path") or ti.get("notebook_path"), ROOT) or ""
+        KEY = f"edit:{path}"
         if path == state_rel or path.startswith(".git/"):
             deny(f"{path}는 직접 쓰지 않는다. 상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다.")
         if path.startswith(".githooks/"):
@@ -142,6 +169,11 @@ def guard(inp):
     if tool not in ("Bash", "PowerShell"):
         return
     cmd = CMD = ti.get("command", "").replace("\\", "/")
+    KEY = f"cmd:{cmd[:200]}"
+    from .core import CFG
+    for g in CFG["guard"]:  # 부품이 정한 막을 명령
+        if re.search(g["pattern"], cmd):
+            deny(g["reason"], g.get("part", ""))
     if HOOK_OFF.search(MSG_ARG.sub(r"\1", cmd)):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
     if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not state_safe(cmd):
@@ -154,6 +186,13 @@ def guard(inp):
         if not quote or quote not in prompt:
             deny("adopt --approved의 문장이 이번 턴 사용자 입력에 없다. 제안서의 바꾸는 것과 근거를 사용자에게 보이고, "
                  "사용자가 승인한 문장을 그대로 넣는다.")
+    m = INCIDENT.search(cmd) if re.search(r"\.gate/gate\.py\s+incident\b", cmd) else None
+    if m:  # 사용자가 지적한 사고는 그 문장이 이번 턴 입력에 있어야 한다
+        quote = " ".join((m.group(1) or m.group(2) or "").split())
+        prompt = read_transcript(inp["transcript_path"], LAUNCH)["prompt"] if inp.get("transcript_path") else ""
+        if not quote or quote not in prompt:
+            deny("incident --quote의 문장이 이번 턴 사용자 입력에 없다. 사용자가 쓴 문장을 그대로 넣고, 결과를 보고 "
+                 "스스로 찾은 결함이면 --quote를 뺀다.")
     flow = load()
     for m in SHELL_WRITE.finditer(cmd):
         if is_protected(m.group(2)):
@@ -357,6 +396,9 @@ def context(event):
              status_text(flow)]
     if P["status_file"] and (ROOT / P["status_file"]).exists():
         text = (ROOT / P["status_file"]).read_text(encoding="utf-8")
+        from .records import fields
+        if fields(text):
+            parts.append(f"{P['status_file']} 머리: " + ", ".join(f"{k} {v}" for k, v in fields(text).items()))
         parts.append(f"아래 {P['status_file']} 절은 항목 머리만 줄인 것이다. 계획 작업이면 전문을 먼저 읽는다.")
         for title in P["status_sections"]:
             m = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
@@ -370,6 +412,11 @@ def context(event):
     if why:
         parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 evolve skill로 "
                      "진단하고 구조 변경 제안서를 쓴다. 지금 요청이 급하면 그 일을 먼저 한다.")
+    from .records import due
+    tidy = due(flow)
+    if tidy:
+        parts.append("[기록 정리 권장] " + "; ".join(tidy) + ". 사용자에게 정리할지 한 번 묻고, 하기로 하면 정리 종류의 "
+                     "계획을 시작한다(python -X utf8 .gate/gate.py records로 크기를 본다).")
     ctx = "\n\n".join(parts)
     if len(ctx) > CONTEXT_CAP:
         ctx = ctx[:CONTEXT_CAP] + f"\n…(잘림. 전문은 {P['status_file'] or '상태 파일'}과 python -X utf8 .gate/gate.py status)"
@@ -397,6 +444,7 @@ def main(event, root):
     if event == "guard":
         try:
             guard(inp)
+            guard_passed()
         except SystemExit:
             raise
         except Exception as e:

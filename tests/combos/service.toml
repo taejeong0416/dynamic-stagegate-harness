@@ -42,6 +42,10 @@ tests = [
 tools = "Read,Grep,Glob"
 effort = "high"
 
+[records]
+index = "plans/INDEX.md"
+index_items = ["기록: 바뀐 동작"]
+
 [kinds.bugfix]
 states = ["REPRO", "FIX", "VERIFY", "REVIEW", "RECORD"]
 back = {VERIFY = ["FIX", "REPRO"], REVIEW = ["FIX", "REPRO"]}
@@ -125,9 +129,9 @@ todo = [
   "실패를 재현하는 테스트나 eval 케이스를 쓰고 \"변경 파일\" 표에 넣은 뒤 커밋한다.",
 ]
 checks = [
-  {check = "filled", section = "재현", items = ["증상", "재현 명령"]},
-  {check = "clean"},
-  {check = "command", section = "재현", item = "재현 명령", expect = "fail"},
+  {check = "filled", section = "재현", items = ["증상", "재현 명령"], part = "bugfix"},
+  {check = "clean", part = "bugfix"},
+  {check = "command", section = "재현", item = "재현 명령", expect = "fail", part = "bugfix"},
 ]
 
 [states.FIX]
@@ -139,12 +143,12 @@ todo = [
   "고치고 커밋한다. 재현 명령이 통과해야 넘어간다. REPRO에서 쓴 테스트나 케이스를 고치면 \"테스트 수정\" 표에 파일과 이유를 쓴다.",
 ]
 checks = [
-  {check = "filled", section = "원인"},
-  {check = "clean"},
-  {check = "files_changed", any = true},
-  {check = "test_edits", state = "REPRO", section = "테스트 수정"},
-  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"]},
-  {check = "command", section = "재현", item = "재현 명령"},
+  {check = "filled", section = "원인", part = "bugfix"},
+  {check = "clean", part = "bugfix"},
+  {check = "files_changed", any = true, part = "bugfix"},
+  {check = "test_edits", state = "REPRO", section = "테스트 수정", part = "bugfix"},
+  {check = "unchanged", state = "REPRO", section = "재현", items = ["재현 명령"], part = "bugfix"},
+  {check = "command", section = "재현", item = "재현 명령", part = "bugfix"},
 ]
 roles = ["implement"]
 
@@ -152,8 +156,8 @@ roles = ["implement"]
 sections = ["검증"]
 todo = ["전체 테스트나 eval 명령([project] test, 비었으면 \"검증\" 절의 테스트 명령)을 돌리고 결과를 쓴다."]
 checks = [
-  {check = "filled", section = "검증", items = ["결과"]},
-  {check = "command", use = "test", section = "검증", item = "테스트 명령"},
+  {check = "filled", section = "검증", items = ["결과"], part = "bugfix"},
+  {check = "command", use = "test", section = "검증", item = "테스트 명령", part = "bugfix"},
 ]
 roles = ["verify"]
 
@@ -163,15 +167,16 @@ todo = [
   "지적이 맞으면 코드는 IMPLEMENT나 FIX로, 계획은 PLAN, SPEC, REPRO로 back해서 고친다.",
 ]
 checks = [
-  {check = "clean"},
+  {check = "clean", part = "diff-review"},
 ]
 review = "{plan}과 계획을 시작한 뒤의 코드 diff {diff}를 검토한다. diff 파일 머리에 '변경 파일' 표와 맞지 않는 파일 목록이 있다. 다음을 찾는다. (1) '변경 파일' 표와 diff가 맞지 않는 곳(표에 있는데 바뀌지 않은 파일, '바꿀 내용'과 다른 변경) (2) feature의 '수용 기준', bugfix의 '재현', refactor의 '확인할 동작' 가운데 확인하는 테스트가 diff나 저장소에 없는 것 (3) '테스트 수정' 표의 테스트 변경 가운데 단언을 빼거나 기대값을 구현에 맞춰 바꿔 테스트를 약하게 한 것 (4) '범위 밖'에 적은 것을 건드린 변경 (5) diff가 새로 만든 결함(빠진 오류 처리, 경계값, 자원 정리, 동시성)."
+review_part = "diff-review"
 
 [states.RECORD]
 sections = ["기록"]
 todo = ["\"기록\" 절에 바뀐 동작, 문서 영향, 남은 일을 쓴다.", "README, docs, CHANGELOG에 영향이 있으면 고쳐 커밋한다."]
 checks = [
-  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"]},
+  {check = "filled", section = "기록", items = ["바뀐 동작", "문서 영향", "남은 일"], part = "feature"},
 ]
 roles = ["record"]
 
@@ -185,10 +190,10 @@ todo = [
   "코드를 커밋한다. chore는 [project] affected(비었으면 test) 명령이 통과해야 넘어간다.",
 ]
 checks = [
-  {check = "files_listed"},
-  {check = "clean"},
-  {check = "files_changed", any = true},
-  {check = "command", use = "affected", optional = true, only = ["chore"]},
+  {check = "files_listed", part = "feature"},
+  {check = "clean", part = "feature"},
+  {check = "files_changed", any = true, part = "feature"},
+  {check = "command", use = "affected", optional = true, only = ["chore"], part = "feature"},
 ]
 roles = ["implement"]
 
@@ -201,12 +206,13 @@ todo = [
   "next P### --review로 검토자를 부른다.",
 ]
 checks = [
-  {check = "filled", section = "요구사항"},
-  {check = "table", section = "수용 기준"},
-  {check = "filled", section = "범위 밖"},
+  {check = "filled", section = "요구사항", part = "feature"},
+  {check = "table", section = "수용 기준", part = "feature"},
+  {check = "filled", section = "범위 밖", part = "feature"},
 ]
 review = "{plan}의 '요구사항', '수용 기준', '범위 밖' 절을 검토한다. 저장소의 관련 코드와 docs/를 읽는다. 다음을 찾는다. (1) 확인 방법이 없거나 주관적인 수용 기준 (2) 요구사항에 있는데 수용 기준이 없는 동작 (3) 기존 코드의 동작과 어긋나는 요구사항."
 review_model = "sonnet"
+review_part = "feature"
 
 [states.PLAN]
 sections = ["변경 파일", "테스트 계획", "위험"]
@@ -217,13 +223,14 @@ todo = [
   "next P### --review로 검토자를 부른다.",
 ]
 checks = [
-  {check = "files_listed"},
-  {check = "table", section = "변경 파일"},
-  {check = "filled", section = "테스트 계획", items = ["확인할 동작"]},
-  {check = "filled", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"]},
+  {check = "files_listed", part = "feature"},
+  {check = "table", section = "변경 파일", part = "feature"},
+  {check = "filled", section = "테스트 계획", items = ["확인할 동작"], part = "feature"},
+  {check = "filled", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"], part = "feature"},
 ]
 review = "{plan}의 계획을 검토한다. 계획 파일이 가리키는 코드와 테스트를 읽는다. 다음을 찾는다. (1) 요구사항이나 목표 중 '변경 파일' 표가 다루지 않는 것 (2) 수용 기준이나 보존할 동작 중 '테스트 계획'이 확인하지 않는 것 (3) 기존 구조와 어긋나는 설계 (4) '위험'에 빠진 영향 범위."
 review_model = "sonnet"
+review_part = "feature"
 roles = ["plan"]
 
 [states.TESTFIRST]
@@ -235,23 +242,23 @@ todo = [
   "테스트를 커밋한다. \"새 테스트 명령\"이 지금 실패해야 넘어간다(구현 전이라 실패하는 게 맞다).",
 ]
 checks = [
-  {check = "files_listed"},
-  {check = "clean"},
-  {check = "files_changed", any = true},
-  {check = "command", section = "테스트 계획", item = "새 테스트 명령", expect = "fail"},
+  {check = "files_listed", part = "test-first"},
+  {check = "clean", part = "test-first"},
+  {check = "files_changed", any = true, part = "test-first"},
+  {check = "command", section = "테스트 계획", item = "새 테스트 명령", expect = "fail", part = "test-first"},
 ]
 
 [states.TEST]
 checks = [
-  {check = "test_edits", state = "TESTFIRST", section = "테스트 수정", only = ["feature"]},
-  {check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"]},
-  {check = "clean"},
-  {check = "test_edits", section = "테스트 수정", only = ["refactor"]},
-  {check = "unchanged", state = "SPEC", only = ["feature"]},
-  {check = "command", section = "테스트 계획", item = "새 테스트 명령", only = ["feature"]},
-  {check = "command", use = "test", section = "테스트 계획", item = "테스트 명령"},
-  {check = "table", section = "테스트 결과"},
-  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"]},
+  {check = "test_edits", state = "TESTFIRST", section = "테스트 수정", only = ["feature"], part = "test-first"},
+  {check = "unchanged", state = "TESTFIRST", section = "테스트 계획", items = ["새 테스트 명령"], only = ["feature"], part = "test-first"},
+  {check = "clean", part = "feature"},
+  {check = "test_edits", section = "테스트 수정", only = ["refactor"], part = "feature"},
+  {check = "unchanged", state = "SPEC", only = ["feature"], part = "feature"},
+  {check = "command", section = "테스트 계획", item = "새 테스트 명령", only = ["feature"], part = "feature"},
+  {check = "command", use = "test", section = "테스트 계획", item = "테스트 명령", part = "feature"},
+  {check = "table", section = "테스트 결과", part = "feature"},
+  {check = "covers", section = "테스트 결과", from = "수용 기준", only = ["feature"], part = "feature"},
 ]
 sections = ["테스트 결과", "테스트 수정"]
 todo = [

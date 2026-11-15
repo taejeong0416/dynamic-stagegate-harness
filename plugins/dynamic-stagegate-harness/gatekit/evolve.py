@@ -15,7 +15,8 @@ import tomllib
 from datetime import datetime
 
 from . import parts as PT
-from .checks import CHECKS, applies, call_reviewer
+from . import records, score
+from .checks import CHECKS, applies, call_reviewer, load_part_checks
 from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
@@ -28,7 +29,9 @@ DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choic
 # 검사가 기본값 없이 읽는 키
 REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
             "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",),
-            "test_edits": ("section",), "covers": ("section", "from")}
+            "test_edits": ("section",), "covers": ("section", "from"), "field": ("field",)}
+# 계획 파일만 보고 판정하는 검사. 닫힌 계획에 새 구조의 검사를 다시 돌릴 수 있다
+REPLAYABLE = ("filled", "table", "covers", "choice", "refs", "paths_exist")
 # command의 use가 가리킬 수 있는 [project] 명령
 COMMAND_USE = ("test", "affected")
 # [review] effort에 쓸 수 있는 claude --effort 값
@@ -157,6 +160,13 @@ def lint(cfg):
         for k in st.get("kinds", []):
             if k not in cfg["kinds"]:
                 bad.append(f"{st.get('n')}단계의 종류 {k}가 [kinds]에 없다")
+    for g in cfg.get("guard", []):
+        try:
+            re.compile(g.get("pattern", "("))
+        except re.error as e:
+            bad.append(f"[[guard]] pattern을 읽지 못했다: {g.get('pattern')} ({e})")
+        if not g.get("reason"):
+            bad.append(f"[[guard]] {g.get('pattern')}: 막은 이유(reason)가 없다")
     return bad
 
 
@@ -352,7 +362,8 @@ def diagnose(flow):
         return stat.setdefault((kind, state), {"visits": 0, "back": 0, "skip": 0, "abandon": 0, "fail": [],
                                                "mins": [], "chars": []})
 
-    for p in flow["plans"].values():
+    plans = records.all_plans(flow)
+    for p in plans.values():
         cfg = cfg_for(p)
         text = (ROOT / p["plan"]).read_text(encoding="utf-8") if (ROOT / p["plan"]).exists() else ""
         ss = sections(text)
@@ -409,12 +420,14 @@ def diagnose(flow):
                   for (k, src, dst), why in sorted(edges.items())]
     else:
         lines.append("없음")
-    done = [p for p in flow["plans"].values() if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since_ts]
+    done = [p for p in plans.values() if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since_ts]
     lines += ["", f"- 마지막 adopt 뒤 끝난 계획: {len(done)}개"]
     ev = read_events(since_ts)
     lines += ["", "## 막힌 기록(마지막 adopt 뒤)", ""]
     counts, misses = {}, {}
     for e in ev:
+        if e["kind"] in ("pass", "guard_pass"):
+            continue
         if e["kind"] == "next":
             m = misses.setdefault((e.get("plan_kind", ""), e.get("state", ""), e["reason"][:70]), [0, set()])
             m[0] += 1
@@ -453,6 +466,7 @@ def diagnose(flow):
         lines.append("- 기준 커밋이 없다")
     if PARTS.exists():
         lines += ["", "## 부품", "", *parts_report()]
+    lines += ["", *score.report(flow), "", "## 기록 크기", "", *records.report(flow)]
     return "\n".join(lines)
 
 
@@ -497,6 +511,7 @@ def proposed(hid, text):
     if not (d / "parts").exists():
         return None, None, [f"{d.relative_to(ROOT).as_posix()}/parts가 없다. propose {hid}로 사본을 만들어 고친다"], []
     try:
+        load_part_checks(d / "parts")  # 제안서가 더한 검사 모듈
         cfg, bad, used = PT.build(d, CFG["version"] + 1)
     except Exception as e:
         return None, None, [f"제안서의 부품을 읽지 못했다: {e}"], []
@@ -526,7 +541,7 @@ def replay(flow, new):
     out = ["진행 중인 계획은 adopt 뒤에도 시작할 때의 구조 버전을 끝까지 쓰고, 새 구조는 다음 계획부터 적용된다. "
            "아래는 각 계획의 종류를 새 구조에 대 본 차이다.", ""]
     n0 = len(out)
-    for pid, p in flow["plans"].items():
+    for pid, p in records.all_plans(flow).items():
         active = p["state"] not in CLOSED
         tag = f"진행 중, 구조 v{p.get('version', CFG['version'])} 유지" if active else "끝남, 새 구조였다면"
         if p["kind"] not in new["kinds"]:
@@ -543,8 +558,51 @@ def replay(flow, new):
     return out if len(out) > n0 else out + ["- 차이가 나는 계획 없음"]
 
 
+def _bare(c):
+    """부품 표시를 뺀 검사. 검사가 다른 부품으로 옮겨 가기만 한 것은 바뀐 것으로 치지 않는다"""
+    return {k: v for k, v in c.items() if k != "part"}
+
+
 def _spec_text(c):
-    return c["check"] + "(" + ", ".join(f"{k}={v}" for k, v in c.items() if k != "check") + ")"
+    return c["check"] + "(" + ", ".join(f"{k}={v}" for k, v in c.items() if k not in ("check", "part")) + ")"
+
+
+def replay_checks(flow, new):
+    """끝난 계획의 계획 파일에 새 구조의 검사를 돌려, 지금 구조와 결과가 달라지는 계획을 보인다"""
+    out, skipped = [], 0
+    incidents = flow.get("incidents", [])
+    for pid, p in sorted(records.all_plans(flow).items()):
+        if p["state"] != "DONE" or p["kind"] not in new["kinds"]:
+            continue
+        f = ROOT / p["plan"]
+        text = f.read_text(encoding="utf-8") if f.exists() else git("show", f"{p['entered']['DONE']['commit']}:{p['plan']}")
+        s = sections(text)
+
+        def misses(cfg):
+            nonlocal skipped
+            found = []
+            for st in cfg["kinds"].get(p["kind"], {}).get("states", []):
+                for spec in cfg["states"].get(st, {}).get("checks", []):
+                    if spec["check"] not in REPLAYABLE or not applies(spec, p["kind"]):
+                        continue
+                    if spec.get("section") and spec["section"] not in s:
+                        skipped += cfg is new  # 그때 계획 틀에 없던 절은 견줄 수 없다
+                        continue
+                    ctx = {"pid": pid, "p": p, "text": text, "s": s, "flow": flow, "state": st, "cfg": cfg}
+                    try:
+                        found += [f"{st}: {m}" for m in CHECKS[spec["check"]](ctx, spec)]
+                    except Exception as e:
+                        found.append(f"{st}: {spec['check']}를 재생하지 못했다({e!r})")
+            return found
+
+        before, after = misses(cfg_for(p)), misses(new)
+        newly, freed = [m for m in after if m not in before], [m for m in before if m not in after]
+        mine = [i["id"] for i in incidents if i["plan"] == pid]
+        if newly or freed:
+            tag = f", 사고 {', '.join(mine)}" if mine else ""
+            out.append(f"- {pid} ({p['kind']}{tag}): 새로 막힘 {newly or '없음'}, 더는 막히지 않음 {freed or '없음'}")
+    out = out or ["- 끝난 계획 가운데 결과가 달라지는 것 없음"]
+    return out + ([f"- 그때 계획 틀에 없던 절을 보는 검사 {skipped}개는 견주지 않았다"] if skipped else [])
 
 
 def weakened(old, new):
@@ -560,9 +618,9 @@ def weakened(old, new):
                 out.append(f"{kname}: 상태 {s}가 빠진다")
                 continue
             o, n, where = old["states"].get(s, {}), new["states"].get(s, {}), f"{kname}/{s}"
-            kept = [c for c in n.get("checks", []) if applies(c, kname)]
+            kept = [_bare(c) for c in n.get("checks", []) if applies(c, kname)]
             out += [f"{where}: 검사 {_spec_text(c)}가 빠지거나 바뀐다" for c in o.get("checks", [])
-                    if applies(c, kname) and c not in kept]
+                    if applies(c, kname) and _bare(c) not in kept]
             if o.get("review") and not n.get("review"):
                 out.append(f"{where}: 검토가 빠진다")
             elif o.get("review") != n.get("review") and o.get("review"):
@@ -680,7 +738,11 @@ def check_proposal(flow, hid, allow_review):
     diag.write_text("\n".join([diagnose(flow), "", *part_lines,
                                "## lint", "", *(problems or ["문제 없음"]), "", "## 빼거나 푸는 변경", "",
                                *loose, "", "## 지난 계획 재생", "",
-                               *replay(flow, new), "", "## 새 구조 경로", "", describe(new), "", mermaid(new),
+                               *replay(flow, new), "", "## 지난 계획 검사 재생", "",
+                               "끝난 계획의 계획 파일에 새 구조의 검사를 다시 돌린 결과다. 계획 파일만 보고 판정하는 검사("
+                               + ", ".join(REPLAYABLE) + ")만 돌린다. 사고가 난 계획이 새로 막히면 그 검사가 사고를 잡는다는 "
+                               "근거이고, 사고가 없던 계획이 새로 막히면 오탐 위험이다.", "",
+                               *replay_checks(flow, new), "", "## 새 구조 경로", "", describe(new), "", mermaid(new),
                                "## diff", "",
                                "```diff", diff, "```", ""]), encoding="utf-8")
     if miss:
@@ -737,10 +799,11 @@ def review_due(flow):
     hz = flow.get("harness", {})
     since = hz.get("ts", 0)
     why = []
-    done = sum(1 for p in flow["plans"].values() if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since)
+    done = sum(1 for p in records.all_plans(flow).values()
+               if p["state"] == "DONE" and p["entered"]["DONE"]["ts"] >= since)
     if done >= CFG["project"]["review_every_plans"]:
         why.append(f"마지막 구조 변경 뒤 계획 {done}개가 끝났다")
-    ev = sum(1 for e in read_events(since) if e["kind"] != "next")
+    ev = sum(1 for e in read_events(since) if e["kind"] in ("guard", "stop"))
     if ev >= CFG["project"]["review_every_events"]:
         why.append(f"마지막 구조 변경 뒤 hook이 {ev}번 막았다")
     if CFG["stages"] and hz.get("stage") != flow.get("stage"):

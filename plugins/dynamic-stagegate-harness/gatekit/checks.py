@@ -12,7 +12,7 @@ import shlex
 import shutil
 import subprocess
 
-from .core import (CFG, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, git_path, is_code, is_test,
+from .core import (CFG, GATE_DIR, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, git_path, is_code, is_test,
                    new_numbers, now, num_value, plan_files, plan_hash, result_status, snapshot, tables)
 
 CHECKS = {}
@@ -319,10 +319,68 @@ def run_checks(ctx):
         fn = CHECKS.get(spec["check"])
         if fn is None:
             raise SystemExit(f"config.toml: 검사 '{spec['check']}'가 없다(있는 것: {', '.join(CHECKS)})")
-        miss += fn(ctx, spec)
+        got = fn(ctx, spec)
+        ctx.setdefault("blame", {}).update({m: spec.get("part", "") for m in got})  # 막은 검사의 부품
+        miss += got
     if not miss and st.get("review") and applies(st.get("review_when", {}), ctx["p"]["kind"]):
-        miss += review_check(ctx, st)
+        got = review_check(ctx, st)
+        ctx.setdefault("blame", {}).update({m: st.get("review_part", "") for m in got})
+        miss += got
     return miss
+
+
+# 기록 검사
+
+@check
+def doc_size(ctx, spec):
+    """현재 상태 문서(path가 없으면 status_file)가 상한 글자 수(max가 없으면 [records] current_max) 안이다"""
+    from .records import REC, read
+    path = spec.get("path") or ctx["cfg"]["project"]["status_file"]
+    n, cap = len(read(path)), spec.get("max", REC["current_max"])
+    if not path or n <= cap:
+        return []
+    return [f"{path}가 {n}자다(상한 {cap}자). 닫힌 항목을 {REC['archive_file'] or '보관 문서'}로 옮긴다"]
+
+
+@check
+def field(ctx, spec):
+    """문서(path가 없으면 status_file) 머리의 field에 값이 있다. after_last = {file, pattern}을 주면 그 값의 번호가
+    file에서 pattern(번호를 괄호로 묶은 정규식)에 맞는 가장 큰 번호의 다음이다"""
+    from .records import fields, read
+    path = spec.get("path") or ctx["cfg"]["project"]["status_file"]
+    val = fields(read(path)).get(spec["field"], "")
+    if not val:
+        return [f"{path} 머리의 '{spec['field']}' 필드가 비었다(첫 줄 ---와 다음 --- 사이에 '{spec['field']}: 값'으로 쓴다)"]
+    rule = spec.get("after_last")
+    if rule:
+        want = max((int(n) for n in re.findall(rule["pattern"], read(rule["file"]))), default=0) + 1
+        got = re.search(rule["pattern"], val)
+        if not got or int(got.group(1)) != want:
+            return [f"{path} 머리의 '{spec['field']}'가 {val}인데, {rule['file']}의 마지막 번호 다음은 {want}다"]
+    return []
+
+
+@check
+def survey(ctx, spec):
+    """정리 전의 문서 크기, 항목 ID, 풀리는 참조를 계획 기록에 남긴다. kept 검사가 정리 뒤와 견준다"""
+    from .records import survey as measure
+    ctx["p"]["survey"] = measure(ctx["flow"])
+    return []
+
+
+@check
+def kept(ctx, spec):
+    """survey 때 풀리던 참조가 지금도 풀리고, 그때 현재 상태 문서에 있던 항목 ID가 현재 상태 문서나 보관 문서에 있다"""
+    from .records import REC, item_ids, read, resolves
+    snap = ctx["p"].get("survey")
+    if snap is None:
+        return ["정리 전 측정 기록이 없다. back으로 측정 상태에 돌아가 다시 넘긴다"]
+    proj = ctx["cfg"]["project"]
+    ledger_text = "\n".join(read(x) for x in REC["ledgers"])
+    have = item_ids(read(proj["status_file"])) | item_ids(read(REC["archive_file"]))
+    miss = [f"정리 전에 풀리던 참조 {r}가 풀리지 않는다" for r in snap["refs"] if not resolves(r, ctx["flow"], ledger_text)]
+    return miss + [f"정리 전 {proj['status_file']}에 있던 항목 {i}가 {proj['status_file']}에도 "
+                   f"{REC['archive_file'] or '보관 문서'}에도 없다" for i in snap["items"] if i not in have]
 
 
 # 판단 검토
@@ -449,3 +507,14 @@ def call_reviewer(prompt, model=None, cfg=None):
                                           "model": f"{model or '기본'}/{effort or '기본'}"}
     except Exception as e:
         return {"pass": False, "missing": [f"검토 호출 실패: {e!r}" + (f" ({err})" if err else "")]}, {}
+
+
+def load_part_checks(folder=None):
+    """부품 폴더의 checks.py를 읽어 검사를 더한다. 모듈은 from gatekit.checks import check로 등록한다"""
+    import importlib.util
+    for f in sorted((folder or GATE_DIR / "parts").glob("*/checks.py")):
+        mod = importlib.util.spec_from_file_location("gate_part_" + re.sub(r"\W", "_", f.parent.name), f)
+        mod.loader.exec_module(importlib.util.module_from_spec(mod))
+
+
+load_part_checks()
