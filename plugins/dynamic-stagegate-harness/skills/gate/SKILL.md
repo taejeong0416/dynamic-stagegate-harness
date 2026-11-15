@@ -5,7 +5,7 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 
 # stagegate state machine으로 일하기
 
-이 프로젝트의 작업은 계획 파일과 상태 경로로 진행한다. 구조의 원본은 `.gate/config.toml`이고 `python -X utf8 .gate/gate.py describe`가 지금 경로를 보여 준다. 명령과 원칙은 `.gate/GATE.md`, 프로젝트 목적은 `.gate/PROFILE.md`에 있다.
+이 프로젝트의 작업은 계획 파일과 상태 경로로 진행한다. 지금 구조는 `.gate/config.toml`에 있고(부품 `.gate/parts`와 `.gate/local.toml`을 조립한 결과다) `python -X utf8 .gate/gate.py describe`가 지금 경로를 보여 준다. 명령과 원칙은 `.gate/GATE.md`, 프로젝트 목적은 `.gate/PROFILE.md`에 있다.
 
 ## 작업 시작
 
@@ -33,8 +33,8 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 
 - 막은 이유가 출력된다. 이유대로 상태를 진행하거나 커밋한다. `--no-verify`, `core.hooksPath` 변경, 상태 파일 직접 편집으로 피하지 않는다.
 - 상태 파일(.gate/state.json)은 gate 명령만 쓴다. git add, commit, checkout, restore는 허용된다. 파일이 커서 읽거나 diff로 열지 말고 `status`나 `diagnose`를 쓴다. gate 명령은 읽기 명령(cat, grep, git log 등)과 이을 수 있지만, Python 스크립트나 리다이렉트로 상태 파일을 다루면 막힌다.
-- 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 사용자 승인을 받는다. config.toml, history, gatekit은 guard가 직접 편집을 막는다.
-- 하네스 파일(.gate/gatekit, config.toml, history, library, GATE.md, .githooks)을 바꾸는 커밋은 다른 파일과 섞지 않고 `harness:`로 시작한다.
+- 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 사용자 승인을 받는다. config.toml, parts, local.toml, parts.lock, history, gatekit은 guard가 직접 편집을 막는다.
+- 하네스 파일(.gate/gatekit, config.toml, parts, local.toml, parts.lock, history, library, GATE.md, .githooks)을 바꾸는 커밋은 다른 파일과 섞지 않고 `harness:`로 시작한다.
 - SessionStart가 하네스 점검을 권하면 사용자에게 한 번 묻고, 하기로 하면 evolve skill을 쓴다.
 
 ## 보고

@@ -15,7 +15,7 @@ Claude Code 에이전트의 작업을 단계로 나누고 단계마다 넘어가
 
 ## 동작 방식
 
-service preset의 feature 작업은 아래 경로를 지난다. 검토 표시가 있는 상태는 읽기 도구만 쓰는 별도 Claude 호출인 검토자가 PASS를 줘야 넘어간다. 코드 표시가 있는 상태에서만 코드 편집과 커밋이 열리고, 테스트 코드 표시가 있는 상태에서는 테스트 파일만 열린다. 넘어가는 조건을 채우지 못하면 그 상태에 머문다. 앞 상태에서 정한 내용이 틀렸으면 `back` 명령으로 되돌아가는데, 종류마다 적어 둔 경로로만 갈 수 있다. 다이어그램의 점선이 그 경로이고, 점선 상자로 묶은 TEST와 REVIEW는 둘 다 IMPLEMENT, PLAN, SPEC으로 돌아갈 수 있다.
+서비스 코드 프로젝트의 feature 작업은 아래 경로를 지난다. 검토 표시가 있는 상태는 읽기 도구만 쓰는 별도 Claude 호출인 검토자가 PASS를 줘야 넘어간다. 코드 표시가 있는 상태에서만 코드 편집과 커밋이 열리고, 테스트 코드 표시가 있는 상태에서는 테스트 파일만 열린다. 넘어가는 조건을 채우지 못하면 그 상태에 머문다. 앞 상태에서 정한 내용이 틀렸으면 `back` 명령으로 되돌아가는데, 종류마다 적어 둔 경로로만 갈 수 있다. 다이어그램의 점선이 그 경로이고, 점선 상자로 묶은 TEST와 REVIEW는 둘 다 IMPLEMENT, PLAN, SPEC으로 돌아갈 수 있다.
 
 ```mermaid
 flowchart LR
@@ -72,53 +72,72 @@ Python 3.11 이상과 git이 필요하다.
    ```
    claude plugin install dynamic-stagegate-harness@dynamic-stagegate-harness
    ```
-3. 하네스를 쓸 프로젝트에서 Claude Code를 열고 preset을 골라 설치 skill을 부른다.
+3. 하네스를 쓸 프로젝트에서 Claude Code를 열고 설치 skill을 부른다.
    ```
-   /dynamic-stagegate-harness:setup service
+   /dynamic-stagegate-harness:setup
    ```
-4. 이어지는 목적 인터뷰에 답한다. 답은 `.gate/PROFILE.md`에 남고 첫 구조 조정에 쓰인다.
+4. 고정 질문 다섯 개(하는 일, 실행 위치, 산출물, 테스트 명령, 실패 비용)에 답한다. 답과 저장소의 사실에 조건이 맞는 부품이 조립되어 첫 구조가 된다.
+5. 이어지는 목적 인터뷰에 답한다. 답은 `.gate/PROFILE.md`에 남고 첫 구조 조정에 쓰인다.
 
 플러그인을 사용자 범위로 설치해도 `.gate/config.toml`이 없는 프로젝트에서는 hook이 아무것도 하지 않는다.
 
 ## 주요 기능
 
-- 설치할 때 목적 인터뷰로 프로젝트의 목적, 검증 방법, 작업 종류, 실패 비용을 정하고, 그에 맞춰 preset 구조를 조정한다.
+- 설치할 때 고정 질문의 답과 저장소의 사실로 부품을 골라 구조를 조립하고, 목적 인터뷰로 프로젝트의 목적, 검증 방법, 작업 종류를 정해 그 구조를 조정한다.
+- 구조는 부품 단위로 관리한다. 부품마다 버전과 파일 해시가 `.gate/parts.lock`에 남아서, 라이브러리에서 고쳐진 부품과 프로젝트에서 고친 부품을 `gate parts`로 구분해 본다.
 - `gate next`가 넘어가는 조건을 검사하고 조건이 맞는 다음 상태로 계획을 옮긴다. 경로에는 조건을 붙일 수 있어서, 마이그레이션이 바뀐 계획만 MIGRATE에 들르게 하거나 `--with quick`으로 시작한 계획은 SPEC을 건너뛰게 할 수 있다.
 - 종류의 `back`에 되돌아가는 경로를 적어 두면 그 경로로만 돌아가고, 경로는 다이어그램에 점선으로, 진단에 경로별 횟수로 나온다.
 - `unchanged` 검사는 상태를 넘길 때 절 내용을 기록해 두고 뒤 상태에서 그 내용이 바뀌었으면 막는다. 실패했던 테스트 명령이나 검토받은 수용 기준을 나중에 고쳐서 통과하지 못한다. `gate run`을 적었거나 실행 결과가 생긴 뒤에는 그 기록을 고정해서, back으로 돌아가 다시 넘겨도 결과를 본 뒤 판정 경계나 eval 케이스를 바꿀 수 없다.
-- `code_unchanged` 검사는 실행 상태에 들어간 뒤 계획의 코드가 바뀌었으면 막는다. ml의 RUN과 agent의 EVAL에 붙어 있어서, 결과가 앞에서 검토받은 코드에서 나왔는지 확인한다.
-- `test_edits` 검사는 먼저 쓴 테스트, 재현 테스트, 고정한 eval 케이스, refactor 전의 테스트를 고치거나 지운 계획을 막는다. 고친 파일과 이유를 "테스트 수정" 표에 쓰면 넘어가고, service의 REVIEW 검토자가 그 변경을 다시 본다.
-- `covers` 검사는 한 표의 첫 칸 값이 모두 다른 표의 첫 칸에 있는지 본다. service의 feature는 수용 기준마다 "테스트 결과" 표에 행이 있어야 TEST를 넘긴다.
+- `code_unchanged` 검사는 실행 상태에 들어간 뒤 계획의 코드가 바뀌었으면 막는다. 실험 경로의 RUN과 에이전트 경로의 EVAL에 붙어 있어서, 결과가 앞에서 검토받은 코드에서 나왔는지 확인한다.
+- `test_edits` 검사는 먼저 쓴 테스트, 재현 테스트, 고정한 eval 케이스, refactor 전의 테스트를 고치거나 지운 계획을 막는다. 고친 파일과 이유를 "테스트 수정" 표에 쓰면 넘어가고, REVIEW 검토자가 그 변경을 다시 본다.
+- `covers` 검사는 한 표의 첫 칸 값이 모두 다른 표의 첫 칸에 있는지 본다. feature는 수용 기준마다 "테스트 결과" 표에 행이 있어야 TEST를 넘긴다.
 - 실패해야 하는 명령은 테스트를 돌리지 못한 경우를 실패로 치지 않는다. 명령의 프로그램을 찾지 못하거나 종료 코드가 4, 5, 126, 127이면 막는다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않아서, 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 넘어갈 수 있다.
-- 검토자는 상태마다 모델을 고를 수 있다. preset은 SPEC과 PLAN 같은 계획 문서 검토를 sonnet으로, 코드 diff를 보는 REVIEW를 기본 모델로 돌린다. 검토자 호출은 사용자 설정을 읽지 않아서 추론 단계는 `[review] effort`로 정하고, preset의 기본값은 high다. MCP 서버와 skill 목록은 검토자에게 넣지 않는다.
-- service와 agent의 구현 상태인 IMPLEMENT와 FIX는 할 일에서 코드 작성을 sonnet 서브에이전트에 맡기라고 안내한다. 먼저 쓴 테스트나 재현 명령이 구현을 검사하므로, 테스트와 계획은 메인 세션의 모델이 쓰고 구현만 sonnet에 맡긴다.
-- 검토자 지시문에 `{diff}`를 넣으면 계획을 시작한 뒤의 코드 diff를 파일로 받는다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 다시 검토하고, 바뀐 코드가 없으면 부르지 않는다. diff 머리에는 "변경 파일" 표에 있는데 바뀌지 않은 파일과 표에 없는데 바뀐 파일이 적힌다. ml은 IMPLEMENT에서 코드 diff를 검토받아, 학습과 채점의 전처리 차이, 대조군과 다른 표본 추출, 결측 처리, 누수를 실행 전에 본다.
+- 검토자는 상태마다 모델을 고를 수 있다. 라이브러리 부품은 SPEC과 PLAN 같은 계획 문서 검토를 sonnet으로, 코드 diff를 보는 REVIEW를 기본 모델로 돌린다. 검토자 호출은 사용자 설정을 읽지 않아서 추론 단계는 `[review] effort`로 정하고, 라이브러리의 기본값은 high다. MCP 서버와 skill 목록은 검토자에게 넣지 않는다.
+- 기능 경로, 결함 경로, 에이전트 경로의 구현 상태인 IMPLEMENT와 FIX는 할 일에서 코드 작성을 sonnet 서브에이전트에 맡기라고 안내한다. 먼저 쓴 테스트나 재현 명령이 구현을 검사하므로, 테스트와 계획은 메인 세션의 모델이 쓰고 구현만 sonnet에 맡긴다.
+- 검토자 지시문에 `{diff}`를 넣으면 계획을 시작한 뒤의 코드 diff를 파일로 받는다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 다시 검토하고, 바뀐 코드가 없으면 부르지 않는다. diff 머리에는 "변경 파일" 표에 있는데 바뀌지 않은 파일과 표에 없는데 바뀐 파일이 적힌다. 실험 경로는 IMPLEMENT에서 코드 diff를 검토받아, 학습과 채점의 전처리 차이, 대조군과 다른 표본 추출, 결측 처리, 누수를 실행 전에 본다.
 - 지시문에 `{context}`를 넣으면 상태의 context에 적은 문서에서 뽑은 발췌를 받는다. 큰 문서는 제목과 제목마다 첫 줄, 계획이 인용한 참조가 든 줄만 담아서, 계속 커지는 결정 기록이나 실험 기록을 호출마다 통째로 읽지 않는다.
-- 종류에 `limit` 조건을 두면 그 조건을 벗어난 계획은 커밋과 `next`가 막힌다. service와 agent의 chore는 계획에 적은 코드 파일이 5개를 넘으면 다른 종류로 다시 시작해야 한다.
-- service의 chore는 `[project] affected` 명령이 통과해야 끝난다. affected에는 `npx vitest related --run {files}`처럼 계획의 코드 파일과 관련된 테스트만 돌리는 명령을 넣고, 비어 있으면 전체 테스트 명령을 쓴다.
+- 종류에 `limit` 조건을 두면 그 조건을 벗어난 계획은 커밋과 `next`가 막힌다. chore는 계획에 적은 코드 파일이 5개를 넘으면 다른 종류로 다시 시작해야 한다.
+- 기능 경로와 함께 쓰는 chore는 `[project] affected` 명령이 통과해야 끝난다. affected에는 `npx vitest related --run {files}`처럼 계획의 코드 파일과 관련된 테스트만 돌리는 명령을 넣고, 비어 있으면 전체 테스트 명령을 쓴다.
 - 코드 편집은 코드 상태인 계획의 "변경 파일" 표에 적은 파일에만 열리고, TESTFIRST, REPRO, EVALSET처럼 테스트만 쓰는 상태에서는 테스트가 아닌 코드 파일의 편집과 커밋을 막는다. 계획의 "변경 파일" 표에 없는 코드 파일은 커밋을 막고, 구조 파일인 config.toml, history, gatekit과 git hook을 직접 편집하는 것도 막는다.
 - 이 세션이 고친 코드나 하네스 파일에 커밋하지 않은 변경이 있거나, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있으면 턴을 끝내지 못하게 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는 막지 않는다.
 - SessionStart hook이 진행 중인 계획과 할 일, 상태 문서 절의 항목 머리를 6,000자 안으로 넣고, 메시지마다 계획 목록이 한 줄씩 들어간다. hook 출력이 10,000자를 넘으면 Claude Code가 앞 2KB만 넣기 때문이다. 컨텍스트가 압축돼도 상태는 파일에 남아 있어서 다시 들어온다.
 - `gate describe --mermaid`가 지금 구조의 경로를 위와 같은 다이어그램으로 출력한다.
 
-## preset
+## 부품
 
-| preset | 쓰는 곳 | 종류와 상태 경로 |
+구조는 부품을 조립해 만든다. 부품은 하나의 기능을 이루는 상태, 절, 검사, 설정의 묶음이고, 부품마다 적용 조건이 있다. 설치할 때 고정 질문의 답과 저장소의 사실로 조건을 판정해서, 조건이 맞은 부품만 `.gate/parts/`에 복사하고 `.gate/config.toml`로 조립한다.
+
+| 부품 | 내용 | 적용 조건 |
 |---|---|---|
-| ml | 대회, 연구 실험 | new와 model(RESEARCH부터 REPLAN까지 8개), tune, freeze, repro, eda, infra. 프로젝트 단계별로 허용 종류를 제한하고, 서버 실행은 커밋과 예상 종료 시각 기록 뒤에만 연다. IMPLEMENT에서 코드 diff를 검토받고, ssh로 저장소 코드를 그 자리에서 돌리는 명령도 실행 기록이나 MEASURE, RECORD 상태를 본다 |
-| agent | LLM 에이전트, 프롬프트, 도구 | behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN), prompt, bugfix, chore. eval 케이스를 구현 전에 커밋하고, 결과 파일이 새로 만들어져야 넘어간다. 고정한 케이스를 고치면 이유를 적어야 한다 |
-| service | 웹 서비스, 앱, 라이브러리, CLI | feature(SPEC, PLAN, TESTFIRST, IMPLEMENT, TEST, REVIEW, RECORD), bugfix(재현 명령이 REPRO에서 실패하고 FIX에서 통과), refactor, chore. chore를 뺀 종류는 REVIEW에서 코드 diff를 검토받는다 |
+| experiment | 실험 경로. new와 model(RESEARCH부터 REPLAN까지 8개), tune, freeze, repro | 하는 일이 실험 |
+| measure | 측정 경로 eda(QUESTION, MEASURE, RECORD, REPLAN) | 하는 일이 실험 |
+| infra | 공용 코드를 고치는 작은 경로 infra | 하는 일이 실험 |
+| competition-stages | 대회 단계 다섯 개와 단계별 허용 종류 | 하는 일이 실험이고 산출물을 밖으로 낸다 |
+| run-record | 실행 상태에서 `gate run` 기록과 코드 고정을 요구하고 학습 서버 설정을 둔다 | 오래 걸리는 실행을 원격에서 돌린다 |
+| value-evidence | 코드에 넣은 숫자 값마다 근거를 적게 한다 | 하는 일이 실험 |
+| sample-run | 긴 실행 전에 작은 표본으로 끝까지 돌려 보게 한다 | 실패하면 시간을 잃는다 |
+| experiment-diff-review | 실험 코드 diff를 계획과 견주는 검토 | 하는 일이 실험 |
+| feature | 기능 경로. feature(SPEC, PLAN, IMPLEMENT, TEST, RECORD)와 refactor | 하는 일이 서비스 코드 |
+| test-first | 구현 앞에 TESTFIRST를 넣어 실패하는 테스트를 먼저 쓰고 고정한다 | 하는 일이 서비스 코드이고 테스트 명령이 있다 |
+| diff-review | 확인 상태 뒤에 코드 diff를 검토하는 REVIEW를 넣는다 | 하는 일이 서비스 코드 |
+| bugfix | 결함 경로 bugfix(REPRO, FIX, VERIFY, RECORD). 재현 명령이 REPRO에서 실패하고 FIX에서 통과해야 한다 | 하는 일이 서비스 코드나 에이전트 |
+| chore | 작은 변경 경로 chore(IMPLEMENT, RECORD). 파일 수 상한이 있다 | 하는 일이 서비스 코드나 에이전트 |
+| eval | 에이전트 경로. behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN)와 prompt. eval 케이스를 구현 전에 커밋하고 고정한다 | 하는 일이 에이전트 |
 
-고른 preset은 처음 구조로 쓰인다. 설치하면 세 preset의 구조가 `.gate/library/`에 같이 들어가서, 구조를 바꿀 때 다른 preset의 상태와 절을 빌려 쓴다.
+경로 부품은 상태에 역할(plan, implement, execute, verify, record, decide)을 붙이고, 다른 부품은 그 역할에 붙는다. diff-review는 확인 역할 뒤에 REVIEW를 넣으므로 기능 경로의 TEST 뒤와 결함 경로의 VERIFY 뒤에 같은 상태가 들어가고, 에이전트 경로와 조립하면 EVAL 뒤에 들어간다. run-record는 실행 역할인 상태에 붙는다.
+
+설치하면 라이브러리 부품 전체가 `.gate/library/`에 같이 들어간다. 폴더 패턴이나 서버 주소처럼 프로젝트마다 다른 값은 `.gate/local.toml`에 두면 조립 결과를 덮어쓴다. `gate parts`는 쓰는 부품 가운데 조건이 거짓이 된 것과 쓰지 않는 부품 가운데 조건이 맞게 된 것을 알린다.
+
+상태와 절의 이름은 구조 전체에서 하나라서, 같은 이름을 다르게 정의하는 부품은 함께 조립되지 않는다. 지금 라이브러리에서는 실험 경로, 기능 경로, 에이전트 경로가 PLAN, IMPLEMENT, RECORD를 서로 다르게 정의해서 한 프로젝트에 둘 이상 넣을 수 없다. 설치 스크립트는 이런 조합을 받으면 충돌하는 이름을 출력하고 멈춘다.
 
 ## 구조 진화
 
 구조는 제안서로만 바꾼다. SessionStart hook은 마지막 구조 변경 뒤 끝난 계획 수나 hook이 막은 횟수가 기준을 넘으면 점검을 권한다.
 
 1. `gate diagnose`가 상태별로 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유, 검토 호출 수와 비용, 되돌아간 경로별 횟수를 모으고, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화도 모은다.
-2. 에이전트가 그 수치를 근거로 `.gate/proposals/H###.md`에 제안서를 쓴다. 상태나 검사를 더하는 변경은 근거 하나로 충분하고, 빼거나 약하게 하는 변경은 진단 수치가 있어야 한다.
-3. `gate check-proposal`이 lint, 새 구조에서 빠지거나 풀리는 검사와 상태와 설정([project], [review], [remote], [[stages]])의 목록, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
-4. 사용자가 바꾸는 것과 근거를 보고 승인하면 `gate adopt`가 적용한다. guard hook은 승인 문장이 이번 턴 사용자 입력에 있는지 확인한다.
+2. 에이전트가 `gate propose H###`로 지금 부품의 사본을 만들어 부품을 더하고 빼고 고친 뒤, 그 수치를 근거로 `.gate/proposals/H###.md`에 제안서를 쓴다. 상태나 검사를 더하는 변경은 근거 하나로 충분하고, 빼거나 약하게 하는 변경은 진단 수치가 있어야 한다.
+3. `gate check-proposal`이 사본을 조립해서 부품별 변경, lint, 새 구조에서 빠지거나 풀리는 검사와 상태와 설정([project], [review], [remote], [[stages]])의 목록, 지난 계획 재생, diff, 새 경로 다이어그램을 진단 파일에 쓰고 검토자를 부른다. 검토자는 그 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경을 찾는다.
+4. 사용자가 바꾸는 것과 근거를 보고 승인하면 `gate adopt`가 부품, local.toml, config.toml, parts.lock을 함께 바꾼다. guard hook은 승인 문장이 이번 턴 사용자 입력에 있는지 확인한다.
 
 앞 구조는 `.gate/history/`에 남고, 진행 중인 계획은 시작할 때의 구조 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 code 패턴, 변경 파일 절 이름, max_visits, stop_states, 검토 모델과 추론 단계도 그 버전을 따르고, 엔진이 바뀐 진행 중 계획은 status와 SessionStart가 알린다. 아래는 마이그레이션 단계와 작은 작업용 선택을 더한 뒤의 feature 경로 예시다.
 
@@ -156,7 +175,7 @@ flowchart LR
 
 ## 넘어가는 조건
 
-구조는 프로젝트의 `.gate/config.toml`에 있고, 키 설명과 명령은 GATE.md에 있다. 상태마다 아래 검사를 골라 붙이며, 검사마다 `only = [종류]`나 `skip = [종류]`로 적용할 종류를 고른다.
+조립한 구조는 프로젝트의 `.gate/config.toml`에 있고, 키 설명과 명령은 GATE.md에 있다. 상태마다 아래 검사를 골라 붙이며, 검사마다 `only = [종류]`나 `skip = [종류]`로 적용할 종류를 고른다.
 
 | 검사 | 통과 조건 |
 |---|---|
@@ -203,18 +222,20 @@ plugins/dynamic-stagegate-harness/
     core.py      설정과 구조 버전, 조건부 경로, 상태 파일, 계획 파일 파싱, git
     checks.py    넘어가는 조건 검사 함수와 검토자 호출
     evolve.py    lint, describe, diagnose, 제안서 검사, adopt
+    parts.py     부품 조립, 적용 조건, parts.lock
     cli.py       gate 명령과 git hook 검사
     hooks.py     guard, stop, 주입 hook
-  presets/ml, agent, service/         config.toml(종류, 상태, 절 정의)
+  library/<부품>/part.toml            부품(종류, 상태, 절, 붙일 자리, 적용 조건)
   GATE.md                             프로젝트에 복사되는 명령과 원칙 설명
   scripts/install.py                  설치와 엔진 갱신
   skills/setup, gate, evolve/         설치와 목적 인터뷰, 운영, 구조 다시 짜기
 tests/test_gate.py                    임시 저장소에 설치해 명령과 hook을 돌려 보는 테스트
+tests/combos/                         실제로 돌아 본 조합의 기대 구조(답으로 조립한 결과와 견준다)
 ```
 
 테스트는 저장소 루트에서 `python -X utf8 -m unittest discover tests`로 돌린다.
 
-설치한 프로젝트의 `.gate/`에는 config.toml(지금 구조), history/(앞 구조 버전), library/(빌려 쓸 구조), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
+설치한 프로젝트의 `.gate/`에는 parts/(쓰는 부품), local.toml(고정 질문의 답과 덮어쓰기), parts.lock(부품 버전과 해시), config.toml(조립한 지금 구조), history/(앞 구조 버전), library/(부품 라이브러리), proposals/(제안서와 진단), PROFILE.md(목적), state.json(계획 상태), GATE.md가 들어간다.
 
 엔진을 프로젝트에 복사하면 엔진 버전이 프로젝트 git에 같이 남아서 나중에 다시 실행해도 같은 규칙이 적용된다. 플러그인을 갱신한 뒤에는 `/dynamic-stagegate-harness:setup update`로 엔진만 바꾸고 `harness:` 커밋으로 남긴다. 엔진의 앞 버전은 보관하지 않아서, 진행 중인 계획이 있으면 update가 경고한다.
 

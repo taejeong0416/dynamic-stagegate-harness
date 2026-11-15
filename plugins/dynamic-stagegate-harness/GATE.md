@@ -24,14 +24,35 @@
 구조는 프로젝트가 자라면서 바뀐다. 새 폴더나 산출물이 생기면 새 상태나 경로가 필요하고, 형식만 채우고 지나가는 상태는 빼거나 조건을 붙인다. 구조는 아래 절차로만 바꾼다.
 
 1. `diagnose`로 상태별 기록, 상태별 검토 호출 수와 비용, 되돌아간 경로별 횟수와 이유, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화를 본다. 상태별 기록은 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유다.
-2. `.gate/proposals/H###.md`에 제안서를 쓴다. "바꾸는 것" 표에 항목마다 근거를 쓰고, "진행 중인 계획" 절에 영향을 쓰고, "새 구조" 절에 새 config 전체를 toml 블록으로 넣는다. version은 지금보다 1 크다.
-3. `check-proposal H### --review`가 lint, 빼거나 푸는 변경 목록, 지난 계획 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
+2. `propose H###`로 지금 부품(`.gate/parts`)과 `.gate/local.toml`의 사본을 `.gate/proposals/H###/`에 만들고, 그 사본에서 부품을 더하고 빼고 고친다. 라이브러리 부품은 `.gate/library/<이름>` 폴더를 사본의 parts 아래에 복사해서 더한다. `.gate/proposals/H###.md`에는 "바꾸는 것" 표에 항목마다 근거를 쓰고 "진행 중인 계획" 절에 영향을 쓴다. parts 폴더가 없는 프로젝트는 사본 대신 제안서의 "새 구조" 절에 새 config 전체를 toml 블록으로 넣고 version을 지금보다 1 크게 쓴다.
+3. `check-proposal H### --review`가 사본을 조립해서 부품별 변경(더함, 뺌, 고침), lint, 빼거나 푸는 변경 목록, 지난 계획 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 검토 뒤에 제안서나 사본이 바뀌면 다시 검토받아야 한다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
 4. 사용자에게 바꾸는 것과 근거를 보이고 승인을 받는다.
-5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 [project]의 계획 값(code, tests, files_section, max_visits, stop_states, test, affected, unreviewed), [review], [remote] exec_states도 계획 버전을 따른다. guard와 pre-commit처럼 여러 계획을 합치는 판단은 지금 구조나 진행 중인 계획의 버전 가운데 하나라도 코드로 보는 파일을 코드로 보고, 허용할 파일은 계획마다 자기 버전으로 뽑는다. 저장소에 하나뿐인 값(plans_dir, state_file, plan_prefix, harness, protected, tracked, pre_commit, status와 decisions 파일, 서버 주소)은 지금 구조를 따른다.
+5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. adopt는 parts 폴더, local.toml, config.toml, parts.lock을 사본의 것으로 바꾼다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 [project]의 계획 값(code, tests, files_section, max_visits, stop_states, test, affected, unreviewed), [review], [remote] exec_states도 계획 버전을 따른다. guard와 pre-commit처럼 여러 계획을 합치는 판단은 지금 구조나 진행 중인 계획의 버전 가운데 하나라도 코드로 보는 파일을 코드로 보고, 허용할 파일은 계획마다 자기 버전으로 뽑는다. 저장소에 하나뿐인 값(plans_dir, state_file, plan_prefix, harness, protected, tracked, pre_commit, status와 decisions 파일, 서버 주소)은 지금 구조를 따른다.
 
 계획을 시작할 때 엔진(.gate/gatekit) 내용의 해시를 남긴다. 엔진이 바뀐 진행 중 계획은 status에 "엔진 바뀜", SessionStart에 "[엔진 변경]"으로 나오고, setup update는 진행 중인 계획이 있으면 경고한다. 엔진의 앞 버전은 보관하지 않으므로, 진행 중인 계획을 끝낸 뒤 갱신하는 편이 안전하다.
 
-`lint [--file <toml>]`은 구조를 따로 검사한다. 모든 종류의 상태가 정의돼 있는지, 검사가 가리키는 절과 항목이 계획 틀에 있는지, 조건 키와 선택이 맞는지, 보호 파일 목록을 줄이지 않았는지 본다.
+`lint [--file <toml>]`은 구조를 따로 검사한다. 모든 종류의 상태가 정의돼 있는지, 검사가 가리키는 절과 항목이 계획 틀에 있는지, 조건 키와 선택이 맞는지, 보호 파일 목록을 줄이지 않았는지 본다. `--file` 없이 부르면 config.toml이 부품과 local.toml을 조립한 결과와 같은지, 부품 파일이 parts.lock과 같은지도 본다.
+
+## 부품
+
+구조는 `.gate/parts/<이름>/part.toml` 부품들과 `.gate/local.toml`을 조립한 결과이고, 조립 결과가 `.gate/config.toml`이다. 엔진은 config.toml만 읽는다. `parts`는 쓰는 부품과 쓰지 않는 라이브러리 부품(`.gate/library/`)을 출력하고, 적용 조건을 지금 저장소와 답으로 다시 판정해서 조건이 거짓이 된 부품과 조건이 맞게 된 부품을 알린다. 프로젝트에서 고친 부품과 라이브러리에 새 버전이 있는 부품도 표시한다.
+
+| part.toml 키 | 뜻 |
+|---|---|
+| name, description, version, origin | 이름, 설명, 버전, 출처(library나 project) |
+| applies_when | 적용 조건. file(glob에 맞는 파일이 있다), command(명령이 성공한다), answer(고정 질문의 답), not, any, all |
+| requires, conflicts | 함께 있어야 하는 부품과 같이 둘 수 없는 부품 |
+| covers | 이 부품이 잡으려는 결함 분류 |
+| `[project]`, `[remote]`, `[review]`, `[[stages]]` | 구조에 더하는 설정. 목록은 합치고, 값 하나짜리 키를 두 부품이 다르게 정하면 조립 문제다 |
+| `[kinds]`, `[states]`, `[sections]` | 종류, 상태, 절의 정의. 상태의 roles에 역할(plan, implement, execute, verify, record, decide)을 적는다 |
+| `[[attach]]` | roles나 states로 고른 상태에 더하는 sections, todo, checks와 그 밖의 상태 키. at으로 순서를 정한다(기본 50, 상태 정의도 50) |
+| `[[insert]]` | state를 before나 after에 적은 역할의 앞이나 뒤에 넣는다. 뒤에 넣은 상태는 앞 상태의 back을 물려받는다 |
+
+attach와 insert의 only, skip은 종류 이름이다. 부품은 경로 부품(종류를 정하는 부품), library 부품, project 부품 순으로, 같은 묶음 안에서는 이름 순으로 쌓인다. 두 부품이 같은 종류, 상태, 절을 다르게 정의하면 조립 문제다.
+
+local.toml의 `[answers]`는 고정 질문의 답(work, run, ships, tests, failure_cost)이고 부품을 고르는 데만 쓴다. `[project]`, `[remote]`, `[review]`는 키 단위로, `[kinds]`, `[states]`, `[sections]`는 이름 아래 필드 단위로 조립 결과를 덮어쓴다.
+
+parts.lock에는 부품마다 버전, 출처, 파일 해시(hash), 라이브러리에서 복사할 때의 해시(from)가 있다. hash와 from이 같으면 프로젝트에서 고치지 않은 부품이다.
 
 ## 구조 파일 형식
 
@@ -71,7 +92,7 @@ review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{con
 
 | 장치 | 막는 경우 |
 |---|---|
-| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
+| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
 | stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때. 그 파일을 적은 계획이 edit = "tests" 상태인데 테스트 파일이 아닐 때. 그 파일을 적은 계획이 종류의 limit을 벗어났을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |
