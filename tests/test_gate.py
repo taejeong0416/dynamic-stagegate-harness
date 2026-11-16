@@ -828,6 +828,16 @@ class MlTest(Repo):
         self.assertIn("results/a.csv", got["scripts"][0])
         self.assertNotIn("<", got["scripts"][0])
 
+    def test_판정_경계_절은_그대로_묶고_나머지_절의_숫자는_검토_해시에서_뺀다(self):
+        self.to_implement()
+        self.implement("x = 7\n")
+        self.edit(self.PLAN, ("seed 3개 평균", "seed 5개 평균"))
+        self.assertIn("PLAN에서 검토한 계획 내용이 바뀌었다", self.gate("next", "P001").stdout)
+        self.edit(self.PLAN, ("seed 5개 평균", "seed 3개 평균"), ("묶음 2,681개", "묶음 2,669개"))
+        out = self.gate("next", "P001").stdout
+        self.assertNotIn("PLAN에서 검토한 계획 내용이 바뀌었다", out)
+        self.assertIn("검토자 호출 1회", out)  # reviewed를 지나 IMPLEMENT 검토만 남았다
+
 
 
 class FeatureTest(Repo):

@@ -384,12 +384,27 @@ def structure_problems(p, text):
     return miss
 
 
+def locked_sections(cfg):
+    """판정 경계 절: 구조의 unchanged 검사가 고정하는 절. 결과를 보기 전에 정해 두는 내용이다"""
+    out = set()
+    for st in cfg["states"].values():
+        for c in st.get("checks", []):
+            if c.get("check") == "unchanged":
+                out |= set(c.get("sections") or ([c["section"]] if c.get("section") else
+                                                 cfg["states"].get(c.get("state"), {}).get("sections", [])))
+    return out
+
+
 def plan_hash(text, cfg):
-    """검토한 내용의 해시. 검토 뒤에 채우는 절(계획이 쓰는 구조 버전의 unreviewed)을 뺀다"""
+    """검토한 내용의 해시. 검토 뒤에 채우는 절(계획이 쓰는 구조 버전의 unreviewed)을 뺀다. 판정 경계 절은 그대로 묶고,
+    나머지 절은 숫자를 지운 뒤 묶어서 실측해 적은 숫자(묶음 수, 메모리) 하나 바뀐 것으로 재검토가 걸리지 않게 한다.
+    영문자 바로 뒤의 숫자(E085, P001 같은 번호)는 지우지 않는다"""
+    locked = locked_sections(cfg)
     parts = [text.split("\n## ")[0]]
     for name, lines in sections(text).items():
         if name not in cfg["project"]["unreviewed"]:
-            parts.append(name + "\n" + "\n".join(lines))
+            b = "\n".join(lines)
+            parts.append(name + "\n" + (b if name in locked else re.sub(r"(?<![A-Za-z_\d])\d[\d,.]*", "#", b)))
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
