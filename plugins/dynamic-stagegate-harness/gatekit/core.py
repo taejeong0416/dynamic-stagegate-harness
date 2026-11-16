@@ -449,19 +449,45 @@ def num_value(s):
             return None
 
 
+def code_numbers(src):
+    """.py 파일 전체를 tokenize로 읽어 줄 번호마다 숫자 토큰. 여러 줄 문자열과 주석 속 숫자는 토큰이 아니라 빠지고,
+    subscript 첨자(argv[4], x[:2])도 값이 아니라서 뺀다. 토큰으로 읽지 못하면 None"""
+    out = {}
+    skip = (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT)
+    try:
+        toks = [t for t in tokenize.generate_tokens(io.StringIO(src).readline) if t.type not in skip]
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    for i, t in enumerate(toks):
+        if t.type != tokenize.NUMBER:
+            continue
+        prev, prev2 = (toks[i - 1].string if i else ""), (toks[i - 2] if i > 1 else None)
+        if prev in ("[", ":") and prev2 is not None and (prev2.type == tokenize.NAME or prev2.string in (")", "]", "[")):
+            continue
+        out.setdefault(t.start[0], []).append(t.string)
+    return out
+
+
 def new_numbers(commit, files):
-    """commit 뒤 커밋에서 files에 새로 들어간 숫자(0과 1 제외)"""
+    """commit 뒤 커밋에서 files에 새로 들어간 숫자(0과 1 제외). .py는 HEAD의 파일 전체를 토큰으로 읽어 diff에 더해진
+    줄의 숫자만 세고, 토큰으로 읽지 못하거나 다른 언어면 줄마다 본다"""
     found = {}
     if not files:
         return found
-    path = None
+    path, nums, ln = None, None, 0
     for line in git("diff", "-U0", f"{commit}..HEAD", "--", *files).splitlines():
         if line.startswith("+++ "):
-            path = line[6:]
+            path = line[6:] if line != "+++ /dev/null" else None
+            nums = code_numbers(git("show", f"HEAD:{path}")) if path and path.endswith(".py") else None
+            continue
+        if line.startswith("@@"):
+            ln = int(re.search(r"\+(\d+)", line).group(1))
             continue
         if path is None or not line.startswith("+"):
             continue
-        for n in numbers_in(line[1:], path):
+        cand = nums.get(ln, []) if nums is not None else numbers_in(line[1:], path)
+        ln += 1
+        for n in cand:
             if num_value(n) not in (0.0, 1.0):
                 found.setdefault(n, f"{path}: {line[1:].strip()[:80]}")
     return found

@@ -787,6 +787,16 @@ class MlTest(Repo):
                   ("| 값 | 쓰는 곳 | 근거 |\n|---|---|---|", "| 값 | 쓰는 곳 | 근거 |\n|---|---|---|" + rows))
         self.commit("docs: 계획", "experiments")
 
+    def test_값_근거는_여러_줄_문자열과_첨자_속_숫자를_세지_않는다(self):
+        self.to_implement()
+        self.implement('"""사용법\n\nFOLDS=12346 python src/m.py\n"""\nimport sys\n\nk = sys.argv[4]\nx = 7\n', values=())
+        out = self.gate("next", "P001").stdout
+        self.assertIn("'값 근거' 표의 값 칸에 없는 숫자 7", out)
+        self.assertNotIn("12346", out)
+        self.assertNotIn("숫자 4 ", out)
+        self.edit(self.PLAN, ("| 값 | 쓰는 곳 | 근거 |\n|---|---|---|", "| 값 | 쓰는 곳 | 근거 |\n|---|---|---|\n| 7 | src/m.py | x |"))
+        self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)  # 숫자 검사를 지나 IMPLEMENT 검토만 남았다
+
     def test_결과_파일은_틀_경로를_빼고_조기_종료_파일이_있으면_나머지_없이_넘어간다(self):
         self.to_implement()
         self.implement("x = 7\n")
