@@ -48,6 +48,15 @@ def table(ctx, spec):
 
 
 @check
+def cell_max(ctx, spec):
+    """절 표의 column번째 칸(0부터, 기본은 마지막 칸)이 행마다 max자 이하다. 검토자와 에이전트가 계획을 읽을 때마다
+    긴 칸이 비용이 된다"""
+    col, cap = spec.get("column", -1), spec["max"]
+    return [f"'{spec['section']}' 표 '{r[0]}' 행의 칸이 {len(r[col])}자다(상한 {cap}자). 줄여 쓴다"
+            for t in tables(sec(ctx, spec)) for r in t if -len(r) <= col < len(r) and len(r[col]) > cap]
+
+
+@check
 def covers(ctx, spec):
     """from 절 표의 첫 칸이 모두 section 절 표의 첫 칸에 있다. 수용 기준마다 결과를 적었는지 본다"""
     def firsts(name):

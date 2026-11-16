@@ -29,9 +29,10 @@ DEFAULT_SECTION = {"results": "실행 계획", "sample": "표본 실행", "choic
 # 검사가 기본값 없이 읽는 키
 REQUIRED = {"filled": ("section",), "table": ("section",), "paths_exist": ("section",),
             "refs": ("section", "file", "pattern"), "commit_since": ("path",), "unchanged": ("state",),
-            "test_edits": ("section",), "covers": ("section", "from"), "field": ("field",)}
+            "test_edits": ("section",), "covers": ("section", "from"), "field": ("field",),
+            "cell_max": ("section", "max")}
 # 계획 파일만 보고 판정하는 검사. 닫힌 계획에 새 구조의 검사를 다시 돌릴 수 있다
-REPLAYABLE = ("filled", "table", "covers", "choice", "refs", "paths_exist")
+REPLAYABLE = ("filled", "table", "covers", "cell_max", "choice", "refs", "paths_exist")
 # command의 use가 가리킬 수 있는 [project] 명령
 COMMAND_USE = ("test", "affected")
 # [review] effort에 쓸 수 있는 claude --effort 값

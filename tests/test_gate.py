@@ -863,6 +863,19 @@ class MlTest(Repo):
         diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
         self.assertIn("tune/IMPLEMENT: 검토 면제 항목이 생기거나 바뀐다('실행 계획: 예상 소요 시간과 근거'이 예면 검토하지 않음)", diag)
 
+    def test_후보_이유_칸이_상한을_넘으면_IDEATE를_넘기지_않는다(self):
+        self.assertIn("P001 t: RESEARCH", self.gate("start", "--kind", "new", "--title", "t").stdout)
+        self.edit(self.PLAN, ("| 읽은 문서(경로나 URL) | 읽고 얻은 것 |\n|---|---|",
+                              "| 읽은 문서(경로나 URL) | 읽고 얻은 것 |\n|---|---|\n| docs/a.md | x |"),
+                  ("| 지난 실험 번호 | 이번 계획과의 관계 |\n|---|---|", "| 지난 실험 번호 | 이번 계획과의 관계 |\n|---|---|\n| E001 | 기준 |"))
+        self.assertIn("P001 t: IDEATE", self.gate("next", "P001").stdout)
+        head = "|---|---|---|---|---|---|---|---|"
+        rows = "".join(f"\n| C{i} | 표현 | 후보 {i} | 작음 | 작음 | E001 | 선택 | 짧은 이유, E001 |" for i in (1, 2))
+        self.edit(self.PLAN, (head, head + rows + "\n| C3 | 범위 | 후보 3 | 작음 | 작음 | E001 | 제외 | " + "긴 이유 " * 60 + "|"))
+        out = self.gate("next", "P001", "--review").stdout
+        self.assertIn("'후보' 표 'C3' 행의 칸이 299자다(상한 250자)", out)
+        self.edit(self.PLAN, ("긴 이유 " * 60, "E001과 같은 방식이라 뺀다. "))
+        self.assertIn("P001 t: SELECT", self.gate("next", "P001", "--review").stdout)
 
 
 class FeatureTest(Repo):
