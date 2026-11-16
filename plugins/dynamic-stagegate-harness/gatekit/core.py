@@ -469,6 +469,17 @@ def new_numbers(commit, files):
 
 # 결과 파일
 
+# 경로 후보: 구분 문자(공백, 쉼표, 괄호, 따옴표) 사이의 토큰. 바로 뒤에 <이름>이나 {k} 같은 틀 문자가 붙은 경로는
+# 실제 파일 이름이 아니라서 고르지 않는다. 끝의 마침표와 쌍점은 문장 부호로 본다
+SEP = r"\s,;()\[\]`'\""
+RESULT_TOKEN = re.compile(rf"(?<![^{SEP}])([^{SEP}<>{{}}]*[^{SEP}<>{{}}.:])(?=[.:]*(?:[{SEP}]|$))")
+
+
+def result_paths(text):
+    """결과 파일 칸에서 경로만 고른다. /가 들었거나 확장자가 있는 토큰이 경로다"""
+    return [x for x in RESULT_TOKEN.findall(text) if "/" in x or re.search(r"\.\w+$", x)]
+
+
 def result_status(paths, since):
     """결과 파일마다 없거나 since(epoch)보다 오래됐으면 이유. [remote]가 있으면 로컬에 없는 경로를 ssh로 본다"""
     out, remote = [], []

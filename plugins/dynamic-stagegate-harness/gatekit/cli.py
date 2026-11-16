@@ -10,7 +10,7 @@ from . import evolve, records, score
 from .checks import run_checks
 from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
                    is_harness, is_test,
-                   load, log_event, next_state, now, parse_config, plan_files, plan_text, save, sections, snapshot,
+                   load, log_event, next_state, now, parse_config, plan_files, plan_text, result_paths, save, sections, snapshot,
                    state_def, structure_problems, template_text)
 
 CLI = "python -X utf8 .gate/gate.py"
@@ -127,6 +127,8 @@ def cmd_next(a, flow):
                 log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state,
                           part=ctx.get("blame", {}).get(m, ""))
         sys.exit(1)
+    for note in ctx.get("notes", []):
+        print(note)
     log_event("pass", "", plan=pid, state=state)  # 앞에서 막힌 기록의 판정에 쓴다
     if state not in p.get("frozen", []):  # gate run 뒤에는 앞 상태의 스냅샷을 바꾸지 않는다(unchanged가 쓴다)
         p.setdefault("passed", {})[state] = snapshot(s)
@@ -174,8 +176,9 @@ def results_seen(p):
     s = sections(plan_text(p))
     for spec in st.get("checks", []):
         if spec.get("check") == "results":
-            paths = bullets(s.get(spec.get("section", "실행 계획"), [])).get(spec.get("item", "결과 파일"), "")
-            if any((ROOT / x).exists() and (ROOT / x).stat().st_mtime >= since for x in paths.replace(",", " ").split()):
+            b = bullets(s.get(spec.get("section", "실행 계획"), []))
+            paths = result_paths(b.get(spec.get("item", "결과 파일"), "") + " " + b.get(spec.get("early", "조기 종료 결과 파일"), ""))
+            if any((ROOT / x).exists() and (ROOT / x).stat().st_mtime >= since for x in paths):
                 return True
     return False
 

@@ -735,6 +735,91 @@ class TidyTest(Repo):
         self.assertIn("모든 상태를 지났다", self.gate("next", "P001").stdout)
 
 
+class MlTest(Repo):
+    """ml 조합의 tune 경로. 결과 파일 칸, 가벼운 실행, 값 근거 숫자, 검토 해시 범위, 후보 이유 칸 상한"""
+    PLAN = "experiments/plans/P001.md"
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.install("ml").returncode, 0)
+        self.git("add", ".gate", ".githooks")
+        self.git("reset", "-q", ".gate/state.json")
+        self.git("commit", "-qm", "harness: install")
+        self.write("experiments/log.csv", "id,score\nE001,0.5\n")
+        self.write("docs/a.md", "x\n")
+        self.write("progress/decisions.md", "# 결정\n\n## 결합 단계로 간다\n")
+        self.assertEqual(self.gate("stage", "2", "--decision", "결합 단계로 간다").returncode, 0)  # new와 tune을 받는 단계
+        self.git("add", "experiments", "docs", "progress", ".gate/state.json")
+        self.git("commit", "-qm", "docs: 기록")
+        self.fake_reviewer()
+
+    def commit(self, msg, *paths):
+        self.git("add", *paths)
+        r = self.git("commit", "-qm", msg)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def to_implement(self, light=None):
+        """tune 계획의 PLAN을 채워 검토를 받고 IMPLEMENT에 둔다. light를 주면 '가벼운 실행' 칸에 쓴다"""
+        self.assertIn("P001 t: PLAN", self.gate("start", "--kind", "tune", "--title", "t").stdout)
+        self.edit(self.PLAN,
+                  ("| 아이디어 행의 조건 | 구현 파일 | 함수나 위치 |\n|---|---|---|",
+                   "| 아이디어 행의 조건 | 구현 파일 | 함수나 위치 |\n|---|---|---|\n| src/m.py | src/m.py | main |"),
+                  ("- 기준 실험:", "- 기준 실험: E001"), ("- 판정 규칙:", "- 판정 규칙: seed 3개 평균"),
+                  ("| 결과 경계 | 다음 행동 | 가리키는 항목 |\n|---|---|---|",
+                   "| 결과 경계 | 다음 행동 | 가리키는 항목 |\n|---|---|---|\n| +0.001 이상 | 채택 | E001 |\n| 그 밖 | 멈춤 | E001 |"),
+                  ("- 실행 위치:", "- 실행 위치: 로컬"),
+                  ("- 결과 파일:", "- 결과 파일: results/a.csv, results/b_<변형>.csv, results/fold{k}.csv (fold별)"),
+                  ("- 조기 종료 결과 파일:", "- 조기 종료 결과 파일: results/early.csv"),
+                  ("- 예상 소요 시간과 근거:", "- 예상 소요 시간과 근거: 약 20분, 묶음 2,681개"))
+        if light:
+            self.edit(self.PLAN, ("- 가벼운 실행:", f"- 가벼운 실행: {light}"))
+        r = self.gate("next", "P001", "--review")
+        self.assertIn("P001 t: IMPLEMENT", r.stdout, r.stdout + r.stderr)
+
+    def implement(self, code, values=("7",)):
+        """코드를 커밋하고 표본 실행과 값 근거를 채운다"""
+        self.write("src/m.py", code)
+        self.commit("feat: m", "src")
+        h = self.git("log", "-1", "--format=%h").stdout.strip()
+        rows = "".join(f"\n| {v} | src/m.py | 근거 없이 정한 값 |" for v in values)
+        self.edit(self.PLAN, ("- 명령:", "- 명령: python src/m.py"), ("- 커밋:", f"- 커밋: {h}"),
+                  ("- 결과 요약:", "- 결과 요약: 끝까지 돌았다"),
+                  ("| 값 | 쓰는 곳 | 근거 |\n|---|---|---|", "| 값 | 쓰는 곳 | 근거 |\n|---|---|---|" + rows))
+        self.commit("docs: 계획", "experiments")
+
+    def test_결과_파일은_틀_경로를_빼고_조기_종료_파일이_있으면_나머지_없이_넘어간다(self):
+        self.to_implement()
+        self.implement("x = 7\n")
+        self.assertIn("P001 t: RUN", self.gate("next", "P001", "--review").stdout)
+        self.assertEqual(self.gate("run", "P001", "--eta", "23:59", "--basis", "b").returncode, 0)
+        out = self.gate("next", "P001").stdout
+        self.assertIn("결과 파일이 없다: results/a.csv", out)
+        for skipped in ("<변형>", "fold{k}", "fold별"):
+            self.assertNotIn(skipped, out)
+        self.write("results/early.csv", "x\n")
+        out = self.gate("next", "P001").stdout
+        self.assertIn("'조기 종료 결과 파일' 1개가 있어 나머지 결과 파일 1개 없이 넘어간다", out)
+        self.assertIn("P001 t: RECORD", out)
+
+    def test_조기_종료_파일이_있어도_서버_확인이_실패하면_막고_틀_경로는_서버에_넘기지_않는다(self):
+        self.write("results/early.csv", "x\n")
+        self.write("probe.py", "import json, sys\nsys.path.insert(0, '.gate')\nfrom gatekit import checks, core\n"
+                   "core.CFG['remote']['host'] = 'srv'\nseen = []\n"
+                   "class R:\n    returncode, stdout, stderr = 255, '', 'Connection refused'\n"
+                   "def fake(args, **kw):\n    seen.append(args[-1])\n    return R()\n"
+                   "core.subprocess.run = fake\n"
+                   "s = core.sections('## 실행 계획\\n\\n- 결과 파일: results/a.csv, results/b_<x>.csv\\n"
+                   "- 조기 종료 결과 파일: results/early.csv\\n')\n"
+                   "ctx = {'s': s, 'p': {'entered': {'RUN': {'ts': 0}}}, 'state': 'RUN'}\n"
+                   "print(json.dumps({'miss': checks.results(ctx, {}), 'scripts': seen}, ensure_ascii=False))\n")
+        r = run([*PY, "probe.py"], self.root)
+        got = json.loads(r.stdout)
+        self.assertTrue(got["miss"] and got["miss"][0].startswith("(서버 확인 실패"), got)
+        self.assertIn("results/a.csv", got["scripts"][0])
+        self.assertNotIn("<", got["scripts"][0])
+
+
+
 class FeatureTest(Repo):
     """feature 경로 전체. 새 테스트는 tests/expect.txt의 패턴이 src/a.py에 있는지 본다"""
     NEW = "git grep -q -f tests/expect.txt -- src/a.py"

@@ -1,7 +1,8 @@
 """넘어가는 조건 검사 함수. config.toml의 [states.X] checks 목록에서 이름으로 부른다.
 
 검사 함수는 (ctx, spec)을 받아 빠진 항목 문장 목록을 돌려준다. 빈 목록이면 통과다.
-ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), state(지금 상태), cfg(계획이 쓰는 구조 버전)
+ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), state(지금 상태), cfg(계획이 쓰는 구조 버전).
+통과했지만 알릴 것은 ctx["notes"]에 더하면 next가 출력한다.
 spec에 only = [종류들] 이나 skip = [종류들] 을 두면 그 종류에만 걸거나 그 종류는 뺀다.
 """
 import hashlib
@@ -13,7 +14,7 @@ import shutil
 import subprocess
 
 from .core import (CFG, GATE_DIR, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, git_path, is_code, is_test,
-                   new_numbers, now, num_value, plan_files, plan_hash, result_status, snapshot, tables)
+                   new_numbers, now, num_value, plan_files, plan_hash, result_paths, result_status, snapshot, tables)
 
 CHECKS = {}
 
@@ -105,14 +106,25 @@ def sample(ctx, spec):
 
 @check
 def results(ctx, spec):
-    """적은 결과 파일이 모두 있고 이 상태에 들어온 뒤에 만들어졌다(remote가 있으면 서버도 본다)"""
-    name, item = spec.get("section", "실행 계획"), spec.get("item", "결과 파일")
-    paths = bullets(ctx["s"].get(name, [])).get(item, "").replace(",", " ").split()
+    """적은 결과 파일이 모두 있고 이 상태에 들어온 뒤에 만들어졌다(remote가 있으면 서버도 본다). 칸에서 경로만 고르고,
+    <이름>이나 {k} 같은 틀 문자가 붙은 경로는 뺀다. early 항목(기본 "조기 종료 결과 파일")의 파일이 모두 새로 있으면
+    나머지 결과 파일이 없어도 통과한다. 계획이 일찍 끝나는 갈래는 뒤 단계 파일을 만들지 않기 때문이다.
+    서버 확인이 실패하면 그대로 막는다"""
+    name, item, early_item = spec.get("section", "실행 계획"), spec.get("item", "결과 파일"), spec.get("early", "조기 종료 결과 파일")
+    b = bullets(ctx["s"].get(name, []))
+    paths, early = result_paths(b.get(item, "")), result_paths(b.get(early_item, ""))
     if not paths:
-        return [f"'{name}' 절의 '{item}'이 비었다"]
-    bad = [x for x in paths if x.startswith((CFG["project"]["plans_dir"].rstrip("/") + "/", ".gate/"))]
-    return [f"결과 파일로 계획 문서를 쓸 수 없다: {x}" for x in bad] or \
-        result_status(paths, ctx["p"]["entered"][ctx["state"]]["ts"])
+        return [f"'{name}' 절의 '{item}'에 확인할 경로가 없다(<이름>, {{k}} 같은 틀 문자가 붙은 경로는 빼고 본다)"]
+    bad = [x for x in paths + early if x.startswith((CFG["project"]["plans_dir"].rstrip("/") + "/", ".gate/"))]
+    if bad:
+        return [f"결과 파일로 계획 문서를 쓸 수 없다: {x}" for x in bad]
+    since = ctx["p"]["entered"][ctx["state"]]["ts"]
+    miss = result_status(paths, since)
+    if miss and early and not any(x.startswith("(서버 확인 실패") for x in miss) and not result_status(early, since):
+        ctx.setdefault("notes", []).append(f"'{early_item}' {len(early)}개가 있어 나머지 결과 파일 {len(miss)}개 없이 "
+                                           "넘어간다: " + "; ".join(miss))
+        return []
+    return miss
 
 
 # 테스트를 돌리지 못한 종료 코드: pytest의 사용 오류(4)와 모은 테스트 없음(5), 셸의 실행 불가(126)와 명령 없음(127)
