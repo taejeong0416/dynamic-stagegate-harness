@@ -149,6 +149,9 @@ def lint(cfg):
                         for x in sorted(fields - REVIEW_FIELDS)]
                 if "context" in fields and not st.get("context"):
                     bad.append(f"{s}: review에 {{context}}를 쓰는데 상태의 context(발췌할 파일 목록)가 비었다")
+            ex = st.get("review_exempt")  # 그 절이 없는 종류에서는 면제가 걸리지 않을 뿐이다
+            if ex and ex.get("section") in ts and ex.get("item") not in bullets(ts[ex["section"]]):
+                bad.append(f"{kname}/{s}: review_exempt가 가리키는 항목 '{ex.get('section')}: {ex.get('item')}'이 계획 틀에 없다")
         if uses_files and cfg["project"]["files_section"] not in ts:
             bad.append(f"{kname}: 파일 검사를 쓰는데 files_section '{cfg['project']['files_section']}' 절이 계획 틀에 없다")
     for s in cfg["project"]["stop_states"]:
@@ -606,7 +609,7 @@ def replay_checks(flow, new):
 
 
 def weakened(old, new):
-    """새 구조에서 빠지거나 풀리는 것. 종류, 상태, 검사, 검토, 테스트만 쓰는 제한, 건너뛰는 조건, 상한"""
+    """새 구조에서 빠지거나 풀리는 것. 종류, 상태, 검사, 검토, 검토 면제, 테스트만 쓰는 제한, 건너뛰는 조건, 상한"""
     out = []
     for kname, k in old["kinds"].items():
         nk = new["kinds"].get(kname)
@@ -633,6 +636,9 @@ def weakened(old, new):
                 out.append(f"{where}: 건너뛰는 조건이 붙거나 바뀐다({fmt_cond(nk['when'][s])})")
             if o.get("review") and n.get("review") and _model_rank(n.get("review_model")) < _model_rank(o.get("review_model")):
                 out.append(f"{where}: 검토 모델이 낮아진다({o.get('review_model') or '기본'}에서 {n.get('review_model')})")
+            if n.get("review") and n.get("review_exempt") and n["review_exempt"] != o.get("review_exempt"):
+                ex = n["review_exempt"]
+                out.append(f"{where}: 검토 면제 항목이 생기거나 바뀐다('{ex.get('section')}: {ex.get('item')}'이 예면 검토하지 않음)")
         if k.get("limit") and nk.get("limit") != k["limit"]:
             out.append(f"{kname}: 상한이 빠지거나 바뀐다({fmt_cond(k['limit'])})")
     return out + weakened_settings(old, new)

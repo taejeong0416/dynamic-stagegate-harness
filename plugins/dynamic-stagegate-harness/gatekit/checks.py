@@ -499,7 +499,8 @@ def rel_path(f):
 
 def review_check(ctx, st):
     """검토자 호출. review에 {diff}가 있으면 코드 diff를 파일로 준다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐
-    코드만 다시 본다. {context}가 있으면 상태의 context 파일에서 뽑은 발췌를 준다"""
+    코드만 다시 본다. {context}가 있으면 상태의 context 파일에서 뽑은 발췌를 준다. 상태의 review_exempt = {section, item}
+    항목이 "예"로 시작하면 부르지 않고 면제를 검토 기록에 남긴다"""
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
     rev = p.get("review", {}).get(state)
     same = bool(rev) and rev["hash"] == plan_hash(text, ctx["cfg"])
@@ -510,6 +511,14 @@ def review_check(ctx, st):
             return []
         if base and not plan_diff(ctx, base)[1].strip():
             return []  # 통과한 뒤 코드가 바뀌지 않았다
+    ex = st.get("review_exempt")
+    light = bullets(ctx["s"].get(ex["section"], [])).get(ex["item"], "") if ex else ""
+    if light.startswith("예"):  # 가벼운 실행은 검토 없이 넘기고, 그 주장이 맞는지는 앞 상태의 검토자가 본다
+        p.setdefault("review", {})[state] = {"pass": True, "hash": plan_hash(text, ctx["cfg"]), "missing": [], "at": now(),
+                                             "exempt": light, "model": "면제", "calls": (rev or {}).get("calls", 0),
+                                             "spent": (rev or {}).get("spent", 0), "upto": git("rev-parse", "--short", "HEAD").strip()}
+        ctx.setdefault("notes", []).append(f"'{ex['item']}: {light}'이라 {state} 검토를 건너뛰었다(상태 파일의 검토 기록에 exempt로 남김)")
+        return []
     model = st.get("review_model") or ctx["cfg"]["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]

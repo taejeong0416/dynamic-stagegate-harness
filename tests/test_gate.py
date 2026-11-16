@@ -797,6 +797,17 @@ class MlTest(Repo):
         self.edit(self.PLAN, ("| 값 | 쓰는 곳 | 근거 |\n|---|---|---|", "| 값 | 쓰는 곳 | 근거 |\n|---|---|---|\n| 7 | src/m.py | x |"))
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)  # 숫자 검사를 지나 IMPLEMENT 검토만 남았다
 
+    def test_가벼운_실행은_구현_검토를_건너뛰고_면제를_검토_기록에_남긴다(self):
+        self.to_implement("예(로컬 1분, 서버 없음)")
+        self.implement("x = 7\n")
+        r = self.gate("next", "P001")
+        self.assertIn("'가벼운 실행: 예(로컬 1분, 서버 없음)'이라 IMPLEMENT 검토를 건너뛰었다", r.stdout)
+        self.assertIn("P001 t: RUN", r.stdout)
+        self.assertEqual(len(self.calls()), 1)  # PLAN 검토만 불렀다
+        rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
+        self.assertEqual((rev["IMPLEMENT"]["exempt"], rev["IMPLEMENT"]["pass"]), ("예(로컬 1분, 서버 없음)", True))
+        self.assertIn("'가벼운 실행'이 '예'인데", self.prompts()[0])  # 그 주장이 맞는지는 PLAN 검토자가 본다
+
     def test_결과_파일은_틀_경로를_빼고_조기_종료_파일이_있으면_나머지_없이_넘어간다(self):
         self.to_implement()
         self.implement("x = 7\n")
@@ -837,6 +848,20 @@ class MlTest(Repo):
         out = self.gate("next", "P001").stdout
         self.assertNotIn("PLAN에서 검토한 계획 내용이 바뀌었다", out)
         self.assertIn("검토자 호출 1회", out)  # reviewed를 지나 IMPLEMENT 검토만 남았다
+
+    def test_검토_면제_항목은_계획_틀에_있어야_하고_바꾸면_푸는_변경으로_나온다(self):
+        self.assertEqual(self.gate("lint").returncode, 0, self.gate("lint").stdout)
+        text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
+        self.write("bad.toml", text.replace('item = "가벼운 실행"', 'item = "싼 실행"'))
+        self.assertIn("tune/IMPLEMENT: review_exempt가 가리키는 항목 '실행 계획: 싼 실행'이 계획 틀에 없다",
+                      self.gate("lint", "--file", "bad.toml").stdout)
+        self.gate("propose", "H001")
+        self.edit(".gate/proposals/H001/parts/experiment-diff-review/part.toml", ('item = "가벼운 실행"', 'item = "예상 소요 시간과 근거"'))
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| 면제 | 없음 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        self.gate("check-proposal", "H001")
+        diag = (self.root / ".gate" / "proposals" / "H001.diag.md").read_text(encoding="utf-8")
+        self.assertIn("tune/IMPLEMENT: 검토 면제 항목이 생기거나 바뀐다('실행 계획: 예상 소요 시간과 근거'이 예면 검토하지 않음)", diag)
 
 
 
