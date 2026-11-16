@@ -2,7 +2,7 @@
 
 guard(PreToolUse): 상태에 맞지 않는 행동을 막는다. 내부 예외가 나면 막되, 하네스 편집과 읽기, git 복구는 허용한다.
 stop(Stop): 이 세션이 고친 코드, 하네스, 상태 파일의 미커밋 변경과, 이번 턴에 다룬 계획이 멈추면 안 되는 상태에 있을 때
-  막는다. 이번 턴에 고친 문서의 미커밋 변경은 알리기만 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는
+  막는다. 서버 작업을 띄운 턴은 답에 남은 시간과 끝나는 시각을 요구하고, PreToolUse hook이 막은 명령은 띄운 것으로 세지 않는다. 이번 턴에 고친 문서의 미커밋 변경은 알리기만 한다. 일반 질문이나 부가 작업 턴, 다른 세션의 작업으로는
   막지 않는다. 5번 연속 막으면 통과시킨다.
 session(SessionStart): 진행 중인 계획과 할 일 전체, status_file 절의 항목 머리를 6,000자 안으로 넣는다.
   prompt(UserPromptSubmit): 계획마다 한 줄만 넣는다.
@@ -228,6 +228,12 @@ def recoverable(inp, root):
 
 # stop
 
+def result_text(x):
+    """tool_result의 본문. 문자열이거나 text 조각 목록이다"""
+    body = x.get("content")
+    return body if isinstance(body, str) else " ".join(y.get("text", "") for y in body or [] if isinstance(y, dict))
+
+
 def read_transcript(path, launch, bg_exec=None):
     """bg_exec(cmd)가 참인 run_in_background 명령도 서버 실행으로 센다(그 자리에서 돌리는 ssh)"""
     from .core import ROOT
@@ -265,22 +271,23 @@ def read_transcript(path, launch, bg_exec=None):
                 found = set(re.findall(r"\b[A-Z]+\d{3}\b", ti["command"]))
                 cli_calls.add(x.get("id"))
             elif x.get("type") == "tool_result" and x.get("tool_use_id") in cli_calls:
-                body = x.get("content")
-                body = body if isinstance(body, str) else " ".join(y.get("text", "") for y in body or []
-                                                                   if isinstance(y, dict))
-                found = set(re.findall(r"^([A-Z]+\d{3}) ", body, re.M))  # start가 출력한 새 번호
+                found = set(re.findall(r"^([A-Z]+\d{3}) ", result_text(x), re.M))  # start가 출력한 새 번호
             own |= found
             edited |= files
             if i >= start:
                 own_turn |= found
                 edited_turn |= files
     launched, text = False, []
+    # PreToolUse hook이 실행 전에 막은 명령은 띄운 것으로 세지 않는다
+    blocked = {x.get("tool_use_id") for d in rows[start:] if d["type"] == "user" and not isinstance(d["message"]["content"], str)
+               for x in d["message"]["content"]
+               if x.get("type") == "tool_result" and x.get("is_error") and "hook error" in result_text(x)}
     for d in rows[start:]:
         c = d["message"]["content"]
         if d["type"] != "assistant" or isinstance(c, str):
             continue
         for x in c:
-            if x.get("type") == "tool_use" and x.get("name") in ("Bash", "PowerShell"):
+            if x.get("type") == "tool_use" and x.get("name") in ("Bash", "PowerShell") and x.get("id") not in blocked:
                 cmd = x["input"].get("command", "").replace("\\", "/")
                 if launch.search(cmd) or (bg_exec and x["input"].get("run_in_background") and bg_exec(cmd)):
                     launched = True

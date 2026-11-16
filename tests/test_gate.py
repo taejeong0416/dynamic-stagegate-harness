@@ -1023,6 +1023,25 @@ class GuardTest(Repo):
         self.write("src/a.py", "a = 2\n")
         self.assertIn("커밋하지 않은 코드", self.guard("Bash", command="ssh srv 'python src/a.py'"))
 
+    def test_stop은_PreToolUse_hook이_막은_명령을_띄운_것으로_세지_않는다(self):
+        self.remote()
+        cmd = {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ssh srv 'nohup python src/a.py &'"}}
+        answer = {"type": "assistant", "message": {"content": [{"type": "text", "text": "띄웠다"}]}}
+
+        def stop(result):
+            rows = [{"type": "user", "message": {"content": "실험을 띄워"}},
+                    {"type": "assistant", "message": {"content": [cmd]}},
+                    {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", **result}]}}, answer]
+            log = self.root / "t.jsonl"
+            log.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
+            r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "stop"], self.root,
+                    json.dumps({"transcript_path": str(log), "session_id": f"s{len(result)}"}),
+                    ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+            return r.stdout
+        self.assertIn("서버 작업을 띄웠는데", stop({"content": "started"}))
+        blocked = stop({"content": "PreToolUse:Bash hook error: 실행 상태이고 gate run 기록이 없어", "is_error": True})
+        self.assertNotIn("서버 작업을 띄웠는데", blocked)
+
     def test_hook을_끄는_명령은_막고_메시지_속_단어는_막지_않는다(self):
         for cmd in ("git commit --no-verify -m x", "git commit -n -m x", "git commit -m 'x' -n",
                     "git commit -nm 'x'", "git config core.hooksPath /dev/null"):
