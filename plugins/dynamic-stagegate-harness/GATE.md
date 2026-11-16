@@ -27,7 +27,7 @@
 
 1. `diagnose`로 상태별 기록, 상태별 검토 호출 수와 비용, 되돌아간 경로별 횟수와 이유, hook이 막은 기록, `next`가 통과하지 못한 이유별 횟수, 저장소 변화, 부품 상태, 사고 기록, 부품 성적, 제안 초안, 기록 크기를 본다. 상태별 기록은 들어온 횟수, back, 건너뜀, 머문 시간, 절 글자 수, 검토 FAIL 이유다.
 2. `propose H###`로 지금 부품(`.gate/parts`)과 `.gate/local.toml`의 사본을 `.gate/proposals/H###/`에 만들고, 그 사본에서 부품을 더하고 빼고 고친다. 라이브러리 부품은 `.gate/library/<이름>` 폴더를 사본의 parts 아래에 복사해서 더한다. `.gate/proposals/H###.md`에는 "바꾸는 것" 표에 항목마다 근거를 쓰고 "진행 중인 계획" 절에 영향을 쓴다. parts 폴더가 없는 프로젝트는 사본 대신 제안서의 "새 구조" 절에 새 config 전체를 toml 블록으로 넣고 version을 지금보다 1 크게 쓴다.
-3. `check-proposal H### --review`가 사본을 조립해서 부품별 변경(더함, 뺌, 고침), lint, 빼거나 푸는 변경 목록, 지난 계획 재생, 지난 계획 검사 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 검사 재생은 끝난 계획의 계획 파일에 새 구조의 검사를 다시 돌려서, 새로 막히는 계획과 더는 막히지 않는 계획을 보인다. 계획 파일만 보고 판정하는 검사(filled, table, covers, choice, refs, paths_exist)만 돌린다. 검토 뒤에 제안서나 사본이 바뀌면 다시 검토받아야 한다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
+3. `check-proposal H### --review`가 사본을 조립해서 부품별 변경(더함, 뺌, 고침), lint, 빼거나 푸는 변경 목록, 지난 계획 재생, 지난 계획 검사 재생, diff를 `H###.diag.md`에 쓰고 검토자를 부른다. 검사 재생은 끝난 계획의 계획 파일에 새 구조의 검사를 다시 돌려서, 새로 막히는 계획과 더는 막히지 않는 계획을 보인다. 계획 파일만 보고 판정하는 검사(filled, table, covers, cell_max, choice, refs, paths_exist)만 돌린다. 검토 뒤에 제안서나 사본이 바뀌면 다시 검토받아야 한다. 목록에는 새 구조에서 빠지는 종류, 상태, 검사, 검토와 풀리는 편집 제한, 새로 붙거나 바뀌는 건너뛰기 조건, 빠지거나 바뀌는 상한, 낮아지는 검토 모델, 생기거나 바뀌는 검토 면제 항목이 나온다. [project], [review], [remote], [[stages]]도 키마다 푸는 방향으로 본다. code, tracked, stop_states, tests 같은 목록은 원소가 빠지면, unreviewed, exec_states, 검토 tools, 단계별 허용 종류는 원소가 늘면, max_visits 같은 상한은 커지면, 검토 model과 effort는 낮아지면 푸는 변경이다. 방향을 정할 수 없는 키가 바뀌면 "바뀐 설정"으로 올린다. 검토자는 목록 가운데 "바꾸는 것" 표에 근거가 없는 변경과, "바뀐 설정" 가운데 실제로 검사를 푸는 변경을 찾는다.
 4. 사용자에게 바꾸는 것과 근거를 보이고 승인을 받는다.
 5. `adopt H### --approved "<사용자가 승인한 문장>"`으로 적용한다. guard가 그 문장이 이번 턴 사용자 입력에 있는지 본다. adopt는 parts 폴더, local.toml, config.toml, parts.lock을 사본의 것으로 바꾼다. 앞 구조는 `.gate/history/v<N>.toml`에 남고, 진행 중인 계획은 시작할 때의 버전을 끝까지 쓴다. 종류와 상태뿐 아니라 [project]의 계획 값(code, tests, files_section, max_visits, stop_states, test, affected, unreviewed), [review], [remote] exec_states도 계획 버전을 따른다. guard와 pre-commit처럼 여러 계획을 합치는 판단은 지금 구조나 진행 중인 계획의 버전 가운데 하나라도 코드로 보는 파일을 코드로 보고, 허용할 파일은 계획마다 자기 버전으로 뽑는다. 저장소에 하나뿐인 값(plans_dir, state_file, plan_prefix, harness, protected, tracked, pre_commit, status와 decisions 파일, 서버 주소)은 지금 구조를 따른다.
 
@@ -117,7 +117,7 @@ parts.lock에는 부품마다 버전, 출처, 파일 해시(hash), 라이브러�
 | 표 | 키 |
 |---|---|
 | `[kinds.<종류>]` | states(상태 순서), options(start --with로 켤 수 있는 선택), when(상태별 들를 조건), back(상태별로 돌아갈 수 있는 앞 상태), limit(이 종류로 진행할 수 있는 조건), extra_sections(상태가 쓰지 않아도 틀에 넣을 절) |
-| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델), context(`{context}` 발췌에 담을 파일 목록) |
+| `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델), context(`{context}` 발췌에 담을 파일 목록), review_exempt(`{section, item}`. 그 bullet 항목이 "예"로 시작하면 검토자를 부르지 않는다) |
 | `[sections."<절>"]` | body(계획 틀에 들어갈 표나 bullet) |
 | `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000) |
 | `[remote]` | host, port, dir(학습 서버), exec_states(gate run 기록이 없어도 ssh로 저장소 코드를 그 자리에서 돌려도 되는 상태) |
@@ -136,6 +136,14 @@ code_unchanged 검사는 이 상태에 들어온 뒤 계획의 코드 파일에 
 
 test_edits 검사는 `[project] tests` 패턴에 맞는 계획의 테스트 파일 가운데 state를 처음 넘긴 뒤 고치거나 지운 파일이 section 표의 첫 칸에 있는지 본다. state를 주지 않으면 계획을 시작한 뒤를 보고, 새로 더한 테스트 파일은 보지 않는다. 테스트가 틀렸으면 고치고 표에 이유를 쓰며, 기대값을 구현에 맞춰 바꾸지 않는다.
 
+cell_max 검사는 section 절 표의 column번째 칸(0부터, 기본은 마지막 칸)이 행마다 max자 이하인지 본다. 검토자와 에이전트가 계획을 읽을 때마다 긴 칸이 비용이 되기 때문이고, 실험 경로는 후보 표의 이유 칸을 한두 문장과 실험 번호로 쓰게 IDEATE와 SELECT에서 250자로 묶는다.
+
+results 검사는 section 절의 item 칸(기본 "실행 계획: 결과 파일")에서 /가 들었거나 확장자가 있는 토큰만 경로로 고른다. 바로 뒤에 `<이름>`이나 `{k}` 같은 틀 문자가 붙은 경로는 실제 파일 이름이 아니라서 확인하지 않고, 서버 확인 셸에는 경로를 따옴표로 묶어 넘긴다. 계획이 일찍 끝나는 갈래(통과한 변형이 없거나 1차 검사에서 떨어짐)는 뒤 단계 파일을 만들지 않으므로, early 칸(기본 "조기 종료 결과 파일")의 파일이 모두 이 상태에 들어온 뒤에 생겼으면 나머지 결과 파일이 없어도 통과하고 그 사실을 출력한다. 서버 확인이 실패하면 조기 종료 파일이 있어도 막는다.
+
+reviewed 검사와 검토자 호출은 검토한 계획 내용을 해시로 견준다. unreviewed 절은 빼고, 판정 경계 절(구조의 unchanged 검사가 고정하는 절)은 글자 그대로 묶으며, 나머지 절은 숫자를 지운 뒤 묶는다. 실측해 적은 묶음 수나 메모리 하나 바뀐 것으로 재검토가 걸리지 않게 하기 위해서고, 영문자 바로 뒤의 숫자(E085, P001 같은 번호)는 지우지 않는다.
+
+상태에 review_exempt를 두면 그 항목이 "예"로 시작하는 계획은 검토자를 부르지 않고 넘어간다. 실험 경로는 IMPLEMENT 코드 diff 검토에 `{section = "실행 계획", item = "가벼운 실행"}`을 두어, 서버 비용이 작은 실행은 diff 검토 없이 돌린다. 면제는 상태 파일의 그 상태 검토 기록에 exempt와 함께 통과로 남고 diagnose 검토 호출 표에는 모델 "면제"로 나온다. 그 칸이 맞는지는 PLAN 검토자가 본다.
+
 covers 검사는 from 절 표의 첫 칸이 모두 section 절 표의 첫 칸에 있는지 본다. `{check = "covers", section = "테스트 결과", from = "수용 기준"}`이면 수용 기준마다 테스트 결과 행이 있어야 넘어가고, 기준 문장은 공백만 다르면 같은 것으로 본다.
 
 command 검사의 `use`는 `[project]`의 test나 affected를 가리키고, affected가 비어 있으면 test를 쓴다. 명령 속 `{files}`는 계획의 코드 파일로 바뀌고, `optional = true`면 명령이 없을 때 통과한다. `expect = "fail"`이면 테스트가 돌고 실패해야 한다. 명령의 프로그램을 찾지 못하거나 종료 코드가 `reject`에 있으면 막는데, `reject`의 기본값은 4, 5, 126, 127이다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않는다. 그래서 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 테스트를 고치지 않았다면 다시 넘길 수 있다.
@@ -151,7 +159,7 @@ review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{con
 | 장치 | 막는 경우 |
 |---|---|
 | guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. adopt의 승인 문장이나 incident의 --quote 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). 부품의 `[[guard]]` pattern에 맞는 명령일 때. hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없을 때 |
-| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때. 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
+| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때(PreToolUse hook이 막아 돌지 않은 명령은 세지 않는다). 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때. 그 파일을 적은 계획이 edit = "tests" 상태인데 테스트 파일이 아닐 때. 그 파일을 적은 계획이 종류의 limit을 벗어났을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |
 
