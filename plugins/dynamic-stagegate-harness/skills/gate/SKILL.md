@@ -34,7 +34,7 @@ description: .gate/config.toml이 있는 프로젝트에서 작업을 state mach
 
 - 막은 이유가 출력된다. 이유대로 상태를 진행하거나 커밋한다. `--no-verify`, `core.hooksPath` 변경, 상태 파일 직접 편집으로 피하지 않는다.
 - 상태 파일(.gate/state.json)은 gate 명령만 쓴다. git add, commit, checkout, restore는 허용된다. 파일이 커서 읽거나 diff로 열지 말고 `status`나 `diagnose`를 쓴다. gate 명령은 읽기 명령(cat, grep, git log 등)과 이을 수 있지만, Python 스크립트나 리다이렉트로 상태 파일을 다루면 막힌다.
-- 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 사용자 승인을 받는다. config.toml, parts, local.toml, parts.lock, history, gatekit은 guard가 직접 편집을 막는다.
+- 구조(상태, 경로, 검사) 자체가 프로젝트와 맞지 않으면 우회하지 말고 evolve skill로 제안서를 써서 check-proposal을 거쳐 바꾼다(approval이 user이면 사용자 승인도 받는다). config.toml, parts, local.toml, parts.lock, history, gatekit은 guard가 직접 편집을 막는다.
 - 하네스 파일(.gate/gatekit, config.toml, parts, local.toml, parts.lock, history, library, GATE.md, .githooks)을 바꾸는 커밋은 다른 파일과 섞지 않고 `harness:`로 시작한다.
 - SessionStart가 하네스 점검을 권하면 사용자에게 한 번 묻고, 하기로 하면 evolve skill을 쓴다.
 - SessionStart가 기록 정리를 권하면 사용자에게 한 번 묻고, 하기로 하면 `start --kind tidy`로 정리 계획을 시작한다. 닫힌 항목은 지우지 않고 보관 문서로 옮기며, 실험 기록과 결정 문서의 행은 지우지 않는다.

@@ -69,7 +69,7 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 
 1. `.gate/PROFILE.md`에 답을 쓴다. 절은 목적, 성공 기준, 검증 방법, 주로 하는 작업, 실패 비용, 산출물, 코드 위치, 실행 환경, 단계다. 사용자의 말을 그대로 옮기고 해석을 덧붙이지 않는다.
 2. 조립된 구조와 PROFILE이 맞지 않는 곳을 찾는다. 바꿀 곳이 없으면 PROFILE만 커밋하고 끝낸다.
-3. 바꿀 곳이 있으면 evolve skill의 제안서 절차로 H001을 쓴다. 근거 칸에는 PROFILE의 해당 절을 인용한다. `propose H001`, `check-proposal H001 --review`, 사용자 승인, `adopt` 순서로 적용한다.
+3. 바꿀 곳이 있으면 evolve skill의 제안서 절차로 H001을 쓴다. 근거 칸에는 PROFILE의 해당 절을 인용한다. `propose H001`, `check-proposal H001 --review`, `adopt` 순서로 적용한다(approval이 user이면 adopt 전에 사용자 승인을 받는다).
 
 ## 갱신(update)
 
