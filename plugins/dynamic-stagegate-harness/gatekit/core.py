@@ -38,6 +38,9 @@ DEFAULTS = {
     "max_visits": 3,
     "files_section": "변경 파일",
     "unreviewed": [],
+    # 구조 변경(adopt) 승인 방식. auto는 check-proposal(lint, 재생, 검토자)을 통과하면 에이전트가 바로 적용하고,
+    # user는 사용자가 이번 턴에 승인한 문장을 --approved로 받아야 적용한다
+    "approval": "auto",
     "stop_states": [],
     "decisions_file": "",
     "status_file": "",
@@ -395,14 +398,36 @@ def locked_sections(cfg):
     return out
 
 
+def unreviewed_parts(names):
+    """unreviewed 항목을 (절 전체, 절마다 bullet 항목, 절마다 표 칸 번호)로 나눈다. "절"은 절 전체, "절: 항목"은 그 절의
+    "- 항목:" 줄, "절[n]"은 그 절 표의 n번째 칸(1부터)이다. 표본 실행 뒤 다시 고치는 예상 시간 줄, 구현하며 이름이 바뀌는
+    함수 칸처럼 검토 뒤에 고쳐도 판단이 바뀌지 않는 부분만 둔다"""
+    whole, items, cols = set(), {}, {}
+    for n in names:
+        m = re.fullmatch(r"(.+?)\[(\d+)\]", n)
+        if m:
+            cols.setdefault(m.group(1).strip(), set()).add(int(m.group(2)))  # split("|")의 0번은 첫 | 앞 빈 칸이다
+        elif ": " in n:
+            sec, item = n.split(": ", 1)
+            items.setdefault(sec.strip(), []).append(item.strip())
+        else:
+            whole.add(n)
+    return whole, items, cols
+
+
 def plan_hash(text, cfg):
     """검토한 내용의 해시. 검토 뒤에 채우는 절(계획이 쓰는 구조 버전의 unreviewed)을 뺀다. 판정 경계 절은 그대로 묶고,
     나머지 절은 숫자를 지운 뒤 묶어서 실측해 적은 숫자(묶음 수, 메모리) 하나 바뀐 것으로 재검토가 걸리지 않게 한다.
     영문자 바로 뒤의 숫자(E085, P001 같은 번호)는 지우지 않는다"""
     locked = locked_sections(cfg)
+    whole, items, cols = unreviewed_parts(cfg["project"]["unreviewed"])
     parts = [text.split("\n## ")[0]]
     for name, lines in sections(text).items():
-        if name not in cfg["project"]["unreviewed"]:
+        if name not in whole:
+            lines = [x for x in lines if not any(x.startswith(f"- {k}:") for k in items.get(name, ()))]
+            if name in cols:
+                lines = ["|".join(c for i, c in enumerate(x.split("|")) if i not in cols[name]) if x.startswith("|") else x
+                         for x in lines]
             b = "\n".join(lines)
             parts.append(name + "\n" + (b if name in locked else re.sub(r"(?<![A-Za-z_\d])\d[\d,.]*", "#", b)))
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]

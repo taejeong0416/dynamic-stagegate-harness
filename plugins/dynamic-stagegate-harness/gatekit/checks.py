@@ -506,6 +506,14 @@ def rel_path(f):
         return f.resolve().as_posix()
 
 
+# 재검토가 한 번에 한두 개씩 새 지적을 내면 같은 상태 검토가 여러 번 돈다(대회 하네스 P031 IDEATE 7회). 첫 검토에 모두
+# 내게 하고, 재검토는 앞 지적과 그 뒤 바뀐 내용만 보며 앞 검토 때 있던 내용에는 결과 해석을 바꿀 결함만 새로 낸다
+FIRST_REVIEW = " 이번 검토에서 빠진 것을 모두 한 번에 낸다. 다음 검토는 이번 지적이 고쳐졌는지와 고친 곳만 본다."
+RE_REVIEW = (" 이 검토는 재검토다. (1) 앞 검토 지적이 고쳐졌는지와 (2) 고치며 바뀐 내용에서 생긴 문제를 본다. 앞 검토 때 이미 "
+             "있던 내용에는 새 지적을 내지 않는다. 다만 누수, 판정 기준이나 결과별 다음 행동의 오류, 근거 없는 값을 근거 있는 "
+             "것처럼 적은 것처럼 결과 해석을 바꿀 결함은 낸다.")
+
+
 def review_check(ctx, st):
     """검토자 호출. review에 {diff}가 있으면 코드 diff를 파일로 준다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐
     코드만 다시 본다. {context}가 있으면 상태의 context 파일에서 뽑은 발췌를 준다. 상태의 review_exempt = {section, item}
@@ -540,7 +548,12 @@ def review_check(ctx, st):
         fields["diff"] = rel_path(f)
     if "{context}" in st["review"]:
         fields["context"] = context_file(ctx, st)
-    result, meta = call_reviewer(st["review"].format(**fields), model, ctx["cfg"])
+    prompt = st["review"].format(**fields)
+    if rev and not rev["pass"] and rev.get("missing"):
+        prompt += RE_REVIEW + " 앞 검토 지적: " + " / ".join(rev["missing"])
+    else:
+        prompt += FIRST_REVIEW
+    result, meta = call_reviewer(prompt, model, ctx["cfg"])
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,

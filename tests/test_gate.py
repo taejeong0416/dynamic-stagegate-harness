@@ -1138,7 +1138,12 @@ class GuardTest(Repo):
                     "python -X utf8 .gate/gate.py status && python -c \"import json\""):
             self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
 
+    def user_approval(self):
+        """승인 방식을 user로 바꾼다(기본은 auto)"""
+        self.edit(".gate/config.toml", ("[project]\n", '[project]\napproval = "user"\n'))
+
     def test_다른_명령에_이은_adopt도_승인_문장을_본다(self):
+        self.user_approval()
         cmd = 'echo x && python -X utf8 .gate/gate.py adopt H001 --approved "그대로 적용해"'
         self.assertIn("이번 턴 사용자 입력에 없다", self.guard("Bash", command=cmd))
 
@@ -1194,6 +1199,7 @@ class GuardTest(Repo):
             self.assertIsNone(self.guard("Bash", command=cmd), cmd)
 
     def test_adopt는_승인_문장이_이번_턴_입력에_있어야_한다(self):
+        self.user_approval()
         log = self.root / "t.jsonl"
         log.write_text(json.dumps({"type": "user", "message": {"content": "H001 그대로 적용해"}}) + "\n", encoding="utf-8")
         cmd = 'python -X utf8 .gate/gate.py adopt H001 --approved "{}"'
@@ -1207,6 +1213,28 @@ class GuardTest(Repo):
                             "transcript_path": str(log)}), ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
         self.assertIn("이번 턴 사용자 입력에 없다", r.stdout)
 
+    def test_승인_방식이_auto면_adopt에_승인_문장이_없어도_된다(self):
+        for cmd in ("python -X utf8 .gate/gate.py adopt H001", 'echo x && python -X utf8 .gate/gate.py adopt H001'):
+            self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+
+    def test_gate가_나오지_않는_heredoc은_gate_명령과_이을_수_있다(self):
+        ok = "python -X utf8 - <<'EOF'\np = 'plans/P001.md'\nprint(p)\nEOF\npython -X utf8 .gate/gate.py status"
+        self.assertIsNone(self.guard("Bash", command=ok))
+        for cmd in ("python -X utf8 - <<'EOF'\nopen('.gate/state.json', 'w')\nEOF\npython -X utf8 .gate/gate.py status",
+                    "python -X utf8 - <<'EOF'\nimport gatekit\nEOF\npython -X utf8 .gate/gate.py status",
+                    "python -X utf8 - <<'EOF'\nx = 1\nEOF\necho '{}' > .gate/state.json"):
+            self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
+
+    def test_검토_해시는_unreviewed의_bullet_항목과_표_칸을_뺀다(self):
+        code = ("import sys; sys.path.insert(0, '.gate'); from gatekit.core import plan_hash, CFG\n"
+                "cfg = {**CFG, 'project': CFG['project'] | {'unreviewed': ['실행 계획: 예상 소요 시간과 근거', '대조표[3]']}}\n"
+                "a = '# P\\n\\n## 실행 계획\\n\\n- 결과 파일: x\\n- 예상 소요 시간과 근거: 약 1시간\\n\\n## 대조표\\n\\n"
+                "| 조건 | 파일 | 함수 |\\n|---|---|---|\\n| c | a.py | f |\\n'\n"
+                "b = a.replace('약 1시간', '표본 측정으로 세 시간').replace('| f |', '| g |')\n"
+                "c = a.replace('결과 파일: x', '결과 파일: y').replace('a.py', 'b.py')\n"
+                "print(plan_hash(a, cfg) == plan_hash(b, cfg), plan_hash(a, cfg) == plan_hash(c, cfg))")
+        r = run([*PY, "-c", code], self.root)
+        self.assertEqual(r.stdout.split(), ["True", "False"], r.stderr)
 
 if __name__ == "__main__":
     unittest.main()

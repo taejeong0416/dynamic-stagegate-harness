@@ -2,7 +2,7 @@
 version = 1
 
 [project]
-unreviewed = ["측정", "정리", "기록", "결정", "표본 실행", "값 근거"]
+unreviewed = ["측정", "정리", "기록", "결정", "실행 계획: 예상 소요 시간과 근거", "행 조건 대조표[3]", "표본 실행", "값 근거"]
 plans_dir = "experiments/plans"
 plan_prefix = "P"
 code = ["experiments/*.py", "src/*.py", "submissions/*.py"]

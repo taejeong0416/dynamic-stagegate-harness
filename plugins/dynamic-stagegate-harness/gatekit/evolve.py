@@ -777,8 +777,9 @@ def adopt(flow, hid, approved):
         raise SystemExit(f"{hid}가 check-proposal 검토를 통과하지 않았거나 검토 뒤 바뀌었다. check-proposal {hid} --review를 먼저 한다")
     if rec.get("adopted"):
         raise SystemExit(f"{hid}는 이미 적용했다")
-    if not approved.strip():
-        raise SystemExit("--approved에 사용자가 이번 턴에 승인한 문장을 그대로 넣는다")
+    user = CFG["project"].get("approval") == "user"
+    if user and not (approved or "").strip():
+        raise SystemExit("승인 방식이 user라 --approved에 사용자가 이번 턴에 승인한 문장을 그대로 넣는다")
     new, raw, bad, _ = proposed(hid, text)
     if new is None or bad or lint(new):
         raise SystemExit("새 구조의 version이나 lint가 맞지 않다. check-proposal을 다시 한다")
@@ -797,7 +798,8 @@ def adopt(flow, hid, approved):
         used = PT.load_parts(PARTS)
         PT.write_lock(GATE_DIR, used, old)
         flow["harness"]["lock"] = PT.lock_hash(used)
-    rec.update({"adopted": True, "approved": " ".join(approved.split()), "adopted_at": now()})
+    rec.update({"adopted": True, "approved": " ".join((approved or "").split()) if user else "자동(check-proposal 통과)",
+                "adopted_at": now()})
     return new["version"]
 
 

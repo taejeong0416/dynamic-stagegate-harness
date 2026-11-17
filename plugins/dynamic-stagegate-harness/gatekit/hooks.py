@@ -70,10 +70,17 @@ def is_read(cmd):
     return bool(segs) and all(READ_SEG.match(s) for s in segs)
 
 
-def state_safe(cmd):
-    """읽기 명령과 gate 명령만 이은 명령인가. 상태 파일을 쓰는 길은 gate 명령뿐이다"""
-    segs = split_cmd(cmd)
-    return bool(segs) and all(READ_SEG.match(s) or CLI_SEG.match(s) for s in segs)
+def state_safe(cmd, state_rel=".gate/state.json"):
+    """읽기 명령과 gate 명령만 이은 명령인가. 상태 파일을 쓰는 길은 gate 명령뿐이다. 본문에 gate나 상태 파일 이름이 한 번도
+    나오지 않는 Python heredoc은 상태를 다루지 않는 단계로 보고 이을 수 있다(문서를 고치는 heredoc과 gate 명령을 이었다가 막힌
+    일이 대회 하네스의 마지막 harness: 커밋 뒤 막힘 15번 중 9번이었다)"""
+    keep = re.compile(r"gate|" + re.escape(state_rel), re.I)
+    segs = split_cmd(HEREDOC.sub(lambda m: m.group(0) if keep.search(m.group(4)) else f"{NO_STATE} ; ", cmd))
+    return bool(segs) and all(READ_SEG.match(s) or CLI_SEG.match(s) or s.strip() == NO_STATE for s in segs)
+
+
+HEREDOC = re.compile(r"\b(python3?|py)(\s+-X\s+utf8)?\s+-\s+<<\s*'?(\w+)'?\n(.*?)\n\3(?:\n|$)", re.S)
+NO_STATE = "__gate_heredoc__"  # 상태를 다루지 않는 heredoc 자리. 실제 명령이 이 이름일 수 없다
 
 
 def emit(obj):
@@ -159,7 +166,7 @@ def guard(inp):
                  "[project] pre_commit에 넣고, hook 자체를 바꿔야 하면 사용자에게 알린다.")
         if is_protected(path):
             deny(f"{path}는 하네스 구조 파일이라 직접 고치지 않는다. .gate/proposals/H###.md에 제안서를 쓰고 "
-                 "check-proposal과 사용자 승인 뒤 adopt로 바꾼다(evolve skill).")
+                 "check-proposal을 통과한 뒤 adopt로 바꾼다(evolve skill).")
         flow = load()
         if is_code_any(path, flow):  # 지금 구조나 진행 중인 계획의 구조 버전 중 하나라도 코드로 보면 코드다
             why = code_gate(path, flow)
@@ -176,10 +183,11 @@ def guard(inp):
             deny(g["reason"], g.get("part", ""))
     if HOOK_OFF.search(MSG_ARG.sub(r"\1", cmd)):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
-    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not state_safe(cmd):
+    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not state_safe(cmd, state_rel):
         deny("상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다. 읽기 명령(cat, grep, git log 등)과 이을 수는 있지만 "
              "Python 스크립트, 리다이렉트, 다른 쓰기 명령으로 다루지 않는다.")
-    if re.search(r"\.gate/gate\.py\s+adopt\b", cmd):  # 구조 변경은 사용자가 이번 턴에 승인했을 때만(이은 명령 안도 본다)
+    # 승인 방식이 user면 구조 변경은 사용자가 이번 턴에 승인했을 때만(이은 명령 안도 본다). auto는 check-proposal 통과로 충분하다
+    if CFG["project"].get("approval") == "user" and re.search(r"\.gate/gate\.py\s+adopt\b", cmd):
         m = ADOPT.search(cmd)
         quote = " ".join((m.group(2) or m.group(3) or "").split()) if m else ""
         prompt = read_transcript(inp["transcript_path"], LAUNCH)["prompt"] if inp.get("transcript_path") else ""

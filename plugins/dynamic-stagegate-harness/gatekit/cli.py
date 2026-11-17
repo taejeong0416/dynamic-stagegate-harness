@@ -389,8 +389,12 @@ def cmd_check_proposal(a, flow):
         for m in miss:
             print("  - " + m)
         sys.exit(1)
-    print(f"{a.hid} 제안서 통과(진단과 diff: {diag}). 사용자에게 바꾸는 것과 근거를 보이고 승인을 받은 뒤 "
-          f"{CLI} adopt {a.hid} --approved \"<사용자가 승인한 문장>\"")
+    if CFG["project"].get("approval") == "user":
+        print(f"{a.hid} 제안서 통과(진단과 diff: {diag}). 사용자에게 바꾸는 것과 근거를 보이고 승인을 받은 뒤 "
+              f"{CLI} adopt {a.hid} --approved \"<사용자가 승인한 문장>\"")
+    else:
+        print(f"{a.hid} 제안서 통과(진단과 diff: {diag}). {CLI} adopt {a.hid}로 적용하고, 바꾼 것과 근거를 결정 기록에 "
+              "쓰고 답에 보고한다")
 
 
 def cmd_adopt(a, flow):
@@ -457,7 +461,7 @@ def main(argv=None):
     cp.add_argument("--review", action="store_true")
     ad = sub.add_parser("adopt")
     ad.add_argument("hid")
-    ad.add_argument("--approved", required=True)
+    ad.add_argument("--approved", default="")
     a = ap.parse_args(argv)
     cmds = {"start": cmd_start, "next": cmd_next, "back": cmd_back, "run": cmd_run, "abandon": cmd_abandon,
             "hold": cmd_hold, "stage": cmd_stage, "status": cmd_status, "git-pre-commit": cmd_pre_commit,
