@@ -463,6 +463,18 @@ class FlowTest(Repo):
         self.write("src/a.py", "a = 2\n")
         self.assertIn("P001 t: RECORD", self.gate("next", "P001").stdout)
 
+    def test_실행_기록은_다시_적으면_바뀌고_상태를_옮기면_빠진다(self):
+        self.runx()
+        self.gate("run", "P001", "--eta", "23:58", "--basis", "b")
+        self.gate("run", "P001", "--eta", "23:59", "--basis", "표본 실행 뒤 다시 잼")
+        self.assertIn("23:59쯤 끝남", self.gate("status", "--line").stdout)
+        self.gate("back", "P001", "IMPLEMENT", "--why", "결과를 봄", "--defect", "plan")
+        self.assertNotIn("끝남", self.gate("status", "--line").stdout)
+        self.assertIn("P001 t: RUNX", self.gate("next", "P001").stdout)
+        self.assertNotIn("끝남", self.gate("status").stdout)
+        state = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual([r["eta"] for r in state["plans"]["P001"]["runs"]], ["23:59"])
+
     def test_gate_run_뒤에는_back으로_다시_넘겨도_unchanged_기준이_그대로다(self):
         self.runx()
         self.assertEqual(self.gate("back", "P001", "IMPLEMENT", "--why", "실행 전", "--defect", "plan").returncode, 0)

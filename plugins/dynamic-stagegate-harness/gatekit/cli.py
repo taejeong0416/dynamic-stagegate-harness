@@ -19,6 +19,8 @@ CLI = "python -X utf8 .gate/gate.py"
 def enter(p, state, note=""):
     p["state"] = state
     p.pop("hold", None)
+    if "run" in p:  # 실행 기록은 그 방문에만 쓴다. 남겨 두면 status가 지난 시각을 보이고 다시 들어온 실행 상태가 기록 없이 열렸다
+        p.setdefault("runs", []).append(p.pop("run"))
     p.setdefault("visits", {})[state] = p.get("visits", {}).get(state, 0) + 1
     rec = {"at": now(), "ts": time.time(), "commit": head()}
     p.setdefault("entered", {})[state] = rec

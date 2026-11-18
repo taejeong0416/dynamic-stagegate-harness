@@ -302,7 +302,12 @@ roles = ["implement"]
 
 [states.RUN]
 run = true
-todo = ["gate run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.", "답에 남은 시간과 끝나는 시각을 쓴다.", "결과가 나오면 next로 RECORD에 들어간다."]
+todo = [
+  "gate run으로 예상 종료 시각과 근거를 적은 뒤 실행한다.",
+  "답에 남은 시간과 끝나는 시각을 쓴다.",
+  "실행 중에 예상 종료 시각이 바뀌면 gate run을 다시 해 고친다.",
+  "결과가 나오면 next로 RECORD에 들어간다.",
+]
 checks = [
   {check = "run_record", part = "run-record"},
   {check = "code_unchanged", part = "run-record"},
