@@ -356,7 +356,8 @@ class FlowTest(Repo):
         self.assertIn("  IMPLEMENT 건너뜀 → [RECORD] → DONE", self.gate("status").stdout)
         self.gate("start", "--kind", "chore", "--title", "t")
         self.assertIn("  [IMPLEMENT] → RECORD → DONE", self.gate("status").stdout)
-        self.assertEqual(self.gate("status", "--line").stdout.strip(), "gate P001 RECORD 2/2, P002 IMPLEMENT 1/2")
+        self.assertEqual(self.gate("status", "--line").stdout.splitlines(),
+                         ["P001 chore  IMPLEMENT 건너뜀 → [RECORD] → DONE", "P002 chore  [IMPLEMENT] → RECORD → DONE"])
         self.write("src/a.py", "a = 2\n")
         self.fill_chore("P002")
         self.git("add", "src/a.py", "plans")

@@ -296,15 +296,17 @@ def path_bar(p):
 
 
 def status_line(flow):
-    """statusline용 한 줄: 진행 중인 계획마다 번호, 지금 상태, 경로에서 몇 번째인지"""
+    """statusline용: 진행 중인 계획마다 한 줄로 번호, 종류, 상태 경로, 실행 기록의 끝나는 시각. 첫 줄 앞에는 프로젝트 단계"""
     out = []
     for pid, p in flow["plans"].items():
-        if p["state"] in CLOSED:
-            continue
-        order = kind_states(cfg_for(p), p["kind"])
-        pos = f" {order.index(p['state']) + 1}/{len(order)}" if p["state"] in order else ""
-        out.append(f"{pid} {p['state']}{pos}")
-    return "gate " + (", ".join(out) if out else "계획 없음")
+        if p["state"] not in CLOSED:
+            eta = f"  {p['run']['eta']}쯤 끝남" if p.get("run") else ""
+            out.append(f"{pid} {p['kind']}  {path_bar(p)}{eta}")
+    out = out or ["계획 없음"]
+    if CFG["stages"]:
+        name = next((st.get("name", "") for st in CFG["stages"] if st["n"] == flow.get("stage")), "")
+        out[0] = f"{flow.get('stage')}단계 {name}".rstrip() + " │ " + out[0]
+    return "\n".join(out)
 
 
 def status_text(flow):
