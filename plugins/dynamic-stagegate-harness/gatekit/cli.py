@@ -218,6 +218,11 @@ def cmd_run(a, flow):
     freeze(p)
     save(flow)
     print(f"{a.pid} 실행 기록: {a.eta}쯤 끝남({a.basis})")
+    # 실행 기록은 바로 커밋한다. 커밋하지 않으면 stop hook이 막아 커밋만 하는 턴이 생겼다(대회 2026-11-18 P038, P040)
+    r = subprocess.run(["git", "commit", "-q", "-m", f"docs: {a.pid} 실행 기록", "--", P["state_file"]], cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8")
+    print(f"{P['state_file']} 커밋" if r.returncode == 0 else
+          f"{P['state_file']} 커밋 실패, 손으로 커밋한다:\n{(r.stdout + r.stderr).strip()}")
 
 
 def cmd_abandon(a, flow):

@@ -19,6 +19,9 @@ status_sections = ["단계", "열린 질문", "다음에 볼 것"]
 
 [remote]
 exec_states = ["RECORD"]
+# IMPLEMENT의 표본 실행은 results/P###_sample에 쓰는 ssh 명령만 연다
+sample_states = ["IMPLEMENT"]
+sample_pattern = "(?i)\\bresults/p\\d+_sample\\b"
 
 [review]
 tools = "Read,Grep,Glob"
@@ -174,7 +177,8 @@ review_model = "sonnet"
 roles = ["implement"]
 sections = ["행 조건 대조표"]
 code = true
-todo = ["행 조건 대조표대로 코드를 쓴다."]
+todo = ["행 조건 대조표대로 코드를 쓴다.",
+        "서버 표본은 출력을 results/P###_sample에 쓰는 명령으로 돌린다([remote] sample_pattern). 그 밖의 서버 실행은 실행 상태에서 한다."]
 checks = [
   {check = "files_listed"},
   {check = "clean"},

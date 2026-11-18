@@ -319,6 +319,17 @@ def exec_open(flow):
                                  for p in flow["plans"].values() if p["state"] not in CLOSED)
 
 
+def sample_open(cmd, flow):
+    """표본 실행이라 ssh 실행을 열어도 되는가: [remote] sample_states 상태의 계획이 있고, 명령에 sample_pattern에
+    맞는 경로가 있다. 표본을 돌리라는 상태에서 서버 실행이 막혀 우회 경로를 찾게 된 일이 있었다(대회 2026-11-18 P039)"""
+    for p in flow["plans"].values():
+        r = cfg_for(p)["remote"]
+        if (p["state"] not in CLOSED and p["state"] in r.get("sample_states", []) and r.get("sample_pattern")
+                and re.search(r["sample_pattern"], cmd)):
+            return True
+    return False
+
+
 # 계획 파일
 
 def sections(text):

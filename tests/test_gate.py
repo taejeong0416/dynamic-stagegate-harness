@@ -295,6 +295,15 @@ class FlowTest(Repo):
         self.assertNotEqual(self.gate("run", "P001", "--eta", "99:99", "--basis", "b").returncode, 0)
         self.assertEqual(self.gate("run", "P001", "--eta", "23:59", "--basis", "b").returncode, 0)
 
+    def test_run은_실행_기록을_상태_파일만_바로_커밋한다(self):
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.write("docs/other.md", "x\n")
+        r = self.gate("run", "P001", "--eta", "23:59", "--basis", "b")
+        self.assertIn(".gate/state.json 커밋", r.stdout, r.stdout + r.stderr)
+        self.assertEqual(self.git("status", "--porcelain", ".gate/state.json").stdout, "")
+        self.assertIn("docs: P001 실행 기록", self.git("log", "-1", "--format=%s").stdout)
+        self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD").stdout.split(), [".gate/state.json"])
+
     def test_조건을_채우지_못하면_머문다(self):
         self.gate("start", "--kind", "chore", "--title", "t")
         r = self.gate("next", "P001")
@@ -1170,6 +1179,21 @@ class GuardTest(Repo):
         self.assertIsNone(self.guard("Bash", command="ssh srv 'cd ~/p && python -X utf8 src/a.py'"))
         self.write("src/a.py", "a = 2\n")
         self.assertIn("커밋하지 않은 코드", self.guard("Bash", command="ssh srv 'python src/a.py'"))
+
+    def test_sample_states_상태에서는_표본_경로가_든_ssh_실행만_열린다(self):
+        self.remote()
+        self.edit(".gate/config.toml", ('exec_states = ["RECORD"]',
+                                        'exec_states = ["RECORD"]\nsample_states = ["IMPLEMENT"]\n'
+                                        'sample_pattern = "(?i)\\\\bresults/p\\\\d+_sample\\\\b"'))
+        self.git("add", ".gate/config.toml")
+        self.assertEqual(self.git("commit", "-qm", "harness: sample").returncode, 0)
+        self.assertIsNone(self.guard("Bash", command="ssh srv 'cd ~/p && python src/a.py --out results/P001_sample'"))
+        self.assertIsNone(self.guard("Bash", command="ssh srv 'bash results/p001_sample/run.sh && python -m src.a'"))
+        r = self.guard("Bash", command="ssh srv 'python src/a.py --out results/main'")
+        self.assertIn("ssh로 저장소 코드", r)
+        self.assertIn("sample_pattern", r)
+        self.write("src/a.py", "a = 3\n")
+        self.assertIn("커밋하지 않은 코드", self.guard("Bash", command="ssh srv 'python src/a.py --out results/p001_sample'"))
 
     def test_stop은_PreToolUse_hook이_막은_명령을_띄운_것으로_세지_않는다(self):
         self.remote()

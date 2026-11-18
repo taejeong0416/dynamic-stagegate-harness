@@ -153,7 +153,7 @@ def guard_passed():
 def guard(inp):
     global CMD, KEY
     from .core import (ROOT, STATE, dirty_code, exec_open, is_code_any, is_protected, load, remote_exec_paths, remote_on,
-                       run_open, LAUNCH, UPLOAD)
+                       run_open, sample_open, LAUNCH, UPLOAD)
     tool, ti = inp.get("tool_name", ""), inp.get("tool_input", {})
     state_rel = STATE.relative_to(ROOT).as_posix()
     if tool in EDIT_TOOLS:
@@ -218,9 +218,12 @@ def guard(inp):
         if LAUNCH.search(cmd) and not run_open(flow):
             deny("실행 상태이고 gate run 기록(예상 종료 시각과 근거)이 있는 계획이 없어 서버 실행을 막았다. "
                  "python -X utf8 .gate/gate.py run P### --eta HH:MM --basis \"...\"를 먼저 한다.")
-        if execs and not exec_open(flow):
+        if execs and not exec_open(flow) and not sample_open(cmd, flow):
+            pat = CFG["remote"].get("sample_pattern")
+            hint = (f" [remote] sample_states 상태의 표본 실행은 명령에 sample_pattern({pat})에 맞는 경로가 들어가면 열린다."
+                    if pat and CFG["remote"].get("sample_states") else "")
             deny(f"ssh로 저장소 코드({', '.join(execs)})를 돌리려면 gate run 기록이 있는 실행 상태 계획이나 [remote] "
-                 "exec_states 상태의 계획이 있어야 한다. nvidia-smi, tail, ps 같은 서버 확인 명령은 막지 않는다.")
+                 f"exec_states 상태의 계획이 있어야 한다.{hint} nvidia-smi, tail, ps 같은 서버 확인 명령은 막지 않는다.")
 
 
 def recoverable(inp, root):
