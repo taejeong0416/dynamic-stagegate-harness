@@ -351,6 +351,21 @@ class FlowTest(Repo):
         rows = [line for line in self.gate("diagnose").stdout.splitlines() if line.startswith("| chore | IMPLEMENT")]
         self.assertEqual(rows, ["| chore | IMPLEMENT | 0 | 0 | 1 | 0 |  |  |  |"])
 
+    def test_status는_경로에_지금_위치와_회차를_표시한다(self):
+        self.gate("start", "--kind", "chore", "--title", "q", "--with", "quick")
+        self.assertIn("  IMPLEMENT 건너뜀 → [RECORD] → DONE", self.gate("status").stdout)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.assertIn("  [IMPLEMENT] → RECORD → DONE", self.gate("status").stdout)
+        self.assertEqual(self.gate("status", "--line").stdout.strip(), "gate P001 RECORD 2/2, P002 IMPLEMENT 1/2")
+        self.write("src/a.py", "a = 2\n")
+        self.fill_chore("P002")
+        self.git("add", "src/a.py", "plans")
+        self.git("commit", "-qm", "feat: a")
+        self.gate("next", "P002")
+        self.assertIn("  IMPLEMENT ✓ → [RECORD] → DONE", self.gate("status").stdout)
+        self.gate("back", "P002", "IMPLEMENT", "--why", "w", "--defect", "plan")
+        self.assertIn("  [IMPLEMENT 2회차] → RECORD → DONE", self.gate("status").stdout)
+
     def test_back은_max_visits에서_멈춘다(self):
         self.gate("start", "--kind", "chore", "--title", "t")
         self.write("src/a.py", "a = 2\n")

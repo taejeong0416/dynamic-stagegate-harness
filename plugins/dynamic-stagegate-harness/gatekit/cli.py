@@ -9,7 +9,7 @@ from pathlib import Path
 from . import evolve, records, score
 from .checks import run_checks
 from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
-                   is_harness, is_test,
+                   is_harness, is_test, kind_states,
                    load, log_event, next_state, now, parse_config, plan_files, plan_text, result_paths, save, sections, snapshot,
                    state_def, structure_problems, template_text)
 
@@ -277,6 +277,36 @@ def cmd_stage(a, flow):
     save(flow)
 
 
+def path_bar(p):
+    """종류의 상태 경로에 지금 위치를 표시한 한 줄. 지난 상태는 ✓, 건너뛴 상태는 건너뜀, 지금 상태는 [ ]와 방문 회차"""
+    order = kind_states(cfg_for(p), p["kind"])
+    cur = order.index(p["state"]) if p["state"] in order else len(order)
+    out = []
+    for i, st in enumerate(order):
+        if i == cur:
+            n = p.get("visits", {}).get(st, 1)
+            out.append(f"[{st} {n}회차]" if n > 1 else f"[{st}]")
+        elif i < cur and p.get("visits", {}).get(st):
+            out.append(f"{st} ✓")
+        elif i < cur and st in p.get("skipped", []):
+            out.append(f"{st} 건너뜀")
+        else:
+            out.append(st)
+    return " → ".join(out + ["DONE"])
+
+
+def status_line(flow):
+    """statusline용 한 줄: 진행 중인 계획마다 번호, 지금 상태, 경로에서 몇 번째인지"""
+    out = []
+    for pid, p in flow["plans"].items():
+        if p["state"] in CLOSED:
+            continue
+        order = kind_states(cfg_for(p), p["kind"])
+        pos = f" {order.index(p['state']) + 1}/{len(order)}" if p["state"] in order else ""
+        out.append(f"{pid} {p['state']}{pos}")
+    return "gate " + (", ".join(out) if out else "계획 없음")
+
+
 def status_text(flow):
     lines = [f"구조 버전 {CFG['version']}"]
     if CFG["stages"]:
@@ -291,6 +321,7 @@ def status_text(flow):
         if p.get("engine", ENGINE) != ENGINE:
             tag += f", 엔진 바뀜({p['engine']}에서 {ENGINE})"
         lines.append(f"{pid} {p['title']}: {p['state']} ({p['kind']}{tag}, 계획 파일 {p['plan']})")
+        lines.append("  " + path_bar(p))
         lines += ["  - " + t for t in todo(p)]
         if p.get("run"):
             lines.append(f"  실행 기록: {p['run']['eta']}쯤 끝남({p['run']['basis']})")
@@ -298,7 +329,7 @@ def status_text(flow):
 
 
 def cmd_status(a, flow):
-    print(status_text(flow))
+    print(status_line(flow) if a.line else status_text(flow))
 
 
 def staged():
@@ -449,7 +480,8 @@ def main(argv=None):
     g = sub.add_parser("stage")
     g.add_argument("n", type=int)
     g.add_argument("--decision", required=True)
-    sub.add_parser("status")
+    st = sub.add_parser("status")
+    st.add_argument("--line", action="store_true")
     sub.add_parser("git-pre-commit")
     cm = sub.add_parser("git-commit-msg")
     cm.add_argument("path")
