@@ -23,12 +23,14 @@ ANSWERS = {
     "service": {"work": "service", "tests": "yes"},
     "agent": {"work": "agent"},
 }
-# 검토자 대신 쓰는 claude. 받은 지시문과 옵션을 남기고 PASS를 돌려준다
+# 검토자 대신 쓰는 claude. 받은 지시문과 옵션을 남기고 PASS를 돌려준다. 결과 파일이 있으면 그 내용을 돌려준다
 FAKE_CLAUDE = '''import json, os, sys
 prompt = sys.stdin.buffer.read().decode("utf-8")
 with open(os.environ["GATE_FAKE_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps({"prompt": prompt, "args": sys.argv[1:]}) + "\\n")
-print(json.dumps({"structured_output": {"pass": True, "missing": []}, "session_id": "s", "total_cost_usd": 0.5}))
+res = os.environ["GATE_FAKE_LOG"] + ".result"
+out = json.load(open(res, encoding="utf-8")) if os.path.exists(res) else {"pass": True, "missing": []}
+print(json.dumps({"structured_output": out, "session_id": "s", "total_cost_usd": 0.5}))
 '''
 
 
@@ -69,6 +71,10 @@ class Repo(unittest.TestCase):
             (d / "claude").chmod(0o755)
         self.log = d / "prompts.jsonl"
         self.env = ENV | {"PATH": str(d) + os.pathsep + ENV.get("PATH", ""), "GATE_FAKE_LOG": str(self.log)}
+
+    def reviewer_says(self, ok, missing=()):
+        """가짜 검토자가 다음 호출부터 돌려줄 결과"""
+        Path(str(self.log) + ".result").write_text(json.dumps({"pass": ok, "missing": list(missing)}), encoding="utf-8")
 
     def calls(self):
         return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
@@ -1035,6 +1041,35 @@ class FeatureTest(Repo):
         rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
         self.assertEqual((rev["SPEC"]["calls"], rev["SPEC"]["spent"], rev["SPEC"]["model"]), (2, 1.0, "sonnet/high"))
         self.assertIn("| feature | SPEC | 2 | 1.00 | sonnet/high |", self.gate("diagnose").stdout)
+
+    def test_통과한_계획을_고치면_통과한_원문과의_diff로_바뀐_곳만_다시_본다(self):
+        self.feature_to_test()
+        spec = "'요구사항', '수용 기준', '범위 밖' 절을 검토한다"
+        self.assertIn("이번 검토에서 빠진 것을 모두 한 번에 낸다", next(p for p in self.prompts() if spec in p))
+        review = self.root / ".git" / "gate-review"
+        self.assertIn("ok를 둔다.", (review / "P001-SPEC-passed.md").read_text(encoding="utf-8"))
+        self.gate("back", "P001", "SPEC", "--why", "w", "--defect", "plan")
+        self.edit("plans/P001.md", ("ok를 둔다.", "ok를 1로 둔다."))
+        self.reviewer_says(False, ["1의 근거가 없다"])
+        self.assertIn("검토: 1의 근거가 없다", self.gate("next", "P001", "--review").stdout)
+        prompt = self.prompts()[-1]
+        self.assertIn(".git/gate-review/P001-SPEC-change.diff", prompt)
+        self.assertIn("바뀌지 않은 내용에는 결과 해석을 바꿀 결함만 낸다", prompt)
+        self.assertNotIn("이번 검토에서 빠진 것을 모두", prompt)
+        diff = (review / "P001-SPEC-change.diff").read_text(encoding="utf-8")
+        self.assertIn("-ok를 둔다.", diff)
+        self.assertIn("+ok를 1로 둔다.", diff)
+        self.reviewer_says(True)  # 변경 검토가 FAIL한 뒤에는 그 지적을 넘기는 재검토다
+        self.edit("plans/P001.md", ("ok를 1로 둔다.", "ok를 1로 둔다. 기존 값과 같다."))
+        self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("이 검토는 재검토다", self.prompts()[-1])
+        self.assertIn("1의 근거가 없다", self.prompts()[-1])
+        self.assertIn("기존 값과 같다.", (review / "P001-SPEC-passed.md").read_text(encoding="utf-8"))
+        self.gate("back", "P001", "SPEC", "--why", "w", "--defect", "plan")  # 통과한 원문이 없는 옛 기록은 첫 검토다
+        (review / "P001-SPEC-passed.md").unlink()
+        self.edit("plans/P001.md", ("기존 값과 같다.", "기존 값과 같고 바꾸지 않는다."))
+        self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("이번 검토에서 빠진 것을 모두 한 번에 낸다", self.prompts()[-1])
 
     def test_수용_기준마다_테스트_결과가_있어야_하고_막힌_이유가_진단에_남는다(self):
         self.feature_to_test()

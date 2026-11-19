@@ -5,6 +5,7 @@ ctx: pid, p(계획 기록), text(계획 파일), s(절), flow(상태 파일), st
 통과했지만 알릴 것은 ctx["notes"]에 더하면 next가 출력한다.
 spec에 only = [종류들] 이나 skip = [종류들] 을 두면 그 종류에만 걸거나 그 종류는 뺀다.
 """
+import difflib
 import hashlib
 import json
 import os
@@ -512,12 +513,16 @@ FIRST_REVIEW = " 이번 검토에서 빠진 것을 모두 한 번에 낸다. 다
 RE_REVIEW = (" 이 검토는 재검토다. (1) 앞 검토 지적이 고쳐졌는지와 (2) 고치며 바뀐 내용에서 생긴 문제를 본다. 앞 검토 때 이미 "
              "있던 내용에는 새 지적을 내지 않는다. 다만 누수, 판정 기준이나 결과별 다음 행동의 오류, 근거 없는 값을 근거 있는 "
              "것처럼 적은 것처럼 결과 해석을 바꿀 결함은 낸다.")
+# 통과한 계획을 고쳐 다시 받는 검토(대회 하네스에서 back으로 PLAN에 온 16번이 모두 첫 검토를 다시 받았다)
+CHANGE_REVIEW = (" 이 검토는 앞 검토를 통과한 계획을 고친 뒤의 검토다. 통과한 원문과의 diff {diff}를 먼저 읽고, 바뀐 내용 자체의 "
+                 "문제와 그 변경 때문에 계획의 다른 절과 맞지 않게 된 곳만 본다. 바뀌지 않은 내용에는 결과 해석을 바꿀 결함만 낸다.")
 
 
 def review_check(ctx, st):
     """검토자 호출. review에 {diff}가 있으면 코드 diff를 파일로 준다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐
-    코드만 다시 본다. {context}가 있으면 상태의 context 파일에서 뽑은 발췌를 준다. 상태의 review_exempt = {section, item}
-    항목이 "예"로 시작하면 부르지 않고 면제를 검토 기록에 남긴다"""
+    코드만 다시 본다. 통과한 뒤 계획을 고쳤으면 통과한 원문과의 diff를 주고 바뀐 곳만 보게 한다. {context}가 있으면
+    상태의 context 파일에서 뽑은 발췌를 준다. 상태의 review_exempt = {section, item} 항목이 "예"로 시작하면 부르지 않고
+    면제를 검토 기록에 남긴다"""
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
     rev = p.get("review", {}).get(state)
     same = bool(rev) and rev["hash"] == plan_hash(text, ctx["cfg"])
@@ -549,15 +554,24 @@ def review_check(ctx, st):
     if "{context}" in st["review"]:
         fields["context"] = context_file(ctx, st)
     prompt = st["review"].format(**fields)
+    passed = git_path(f"gate-review/{ctx['pid']}-{state}-passed.md")
+    passed.parent.mkdir(parents=True, exist_ok=True)
     if rev and not rev["pass"] and rev.get("missing"):
         prompt += RE_REVIEW + " 앞 검토 지적: " + " / ".join(rev["missing"])
-    else:
+    elif rev and rev["pass"] and not same and not rev.get("exempt") and passed.exists():
+        f = git_path(f"gate-review/{ctx['pid']}-{state}-change.diff")
+        f.write_text("\n".join(difflib.unified_diff(passed.read_text(encoding="utf-8").splitlines(), text.splitlines(),
+                                                    "통과한 원문", "지금 계획", lineterm="")) + "\n", encoding="utf-8")
+        prompt += CHANGE_REVIEW.format(diff=rel_path(f))
+    else:  # 첫 검토. 통과한 원문이 없는 옛 기록과 면제로 넘긴 기록도 여기로 온다
         prompt += FIRST_REVIEW
     result, meta = call_reviewer(prompt, model, ctx["cfg"])
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
                                          "spent": round(spent + (meta.get("cost") or 0), 6)}
+    if result["pass"]:
+        passed.write_text(text, encoding="utf-8")
     if uses_diff:  # 다음 검토의 diff 시작점. 실패하면 앞에서 통과한 시점을 그대로 둔다
         p["review"][state]["upto"] = git("rev-parse", "--short", "HEAD").strip() if result["pass"] else base
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
