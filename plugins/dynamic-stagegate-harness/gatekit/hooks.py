@@ -233,6 +233,20 @@ def guard(inp):
         if not quote or quote not in prompt:
             deny("incident --quote의 문장이 이번 턴 사용자 입력에 없다. 사용자가 쓴 문장을 그대로 넣고, 결과를 보고 "
                  "스스로 찾은 결함이면 --quote를 뺀다.")
+    m = re.search(r"\.gate/gate\.py\s+check-proposal\s+(\S+)", cmd)
+    if m and inp.get("transcript_path"):  # 제안서의 사용자 결정 인용은 이 세션 사용자 입력에 있어야 검토자가 근거로 받는다
+        from .evolve import decision_mark, decision_quotes, proposal_path, quotes_hash
+        f = proposal_path(m.group(1))
+        quotes = decision_quotes(f.read_text(encoding="utf-8")) if f.exists() else []
+        if quotes:
+            said = session_prompts(inp["transcript_path"])
+            miss = [q for q in quotes if not any(q in s for s in said)]
+            if miss:
+                deny(f"제안서 '사용자 결정' 절의 인용이 이 세션의 사용자 입력에 없다: {' / '.join(miss)}. 사용자가 쓴 문장을 "
+                     "그대로 옮기고, 사용자가 하지 않은 말이면 그 절에서 빼고 진단 수치를 근거로 쓴다.")
+            mark = decision_mark(m.group(1))
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text(json.dumps({"hash": quotes_hash(quotes), "quotes": quotes}, ensure_ascii=False), encoding="utf-8")
     hit = next((t for t in sorted(paths) if protected_path(t)), None)
     if hit and WRITE_CMD.search(cmd) and not state_safe(cmd, state_rel):
         deny(f"{hit}는 하네스 구조 파일이라 셸로 쓰거나 옮기거나 지우거나 복사하지 않는다. 구조는 제안서와 adopt로 바꾸고, "
@@ -342,6 +356,24 @@ def read_transcript(path, launch, bg_exec=None):
     notified = "<task-notification>" in prompt
     return {"own": own, "edited": edited, "own_turn": own_turn, "edited_turn": edited_turn, "launched": launched,
             "text": "\n".join(text), "prompt": prompt, "notified": notified}
+
+
+def session_prompts(path):
+    """이 세션의 사용자 입력. 도구 결과, hook 피드백, 작업 알림, 메타 메시지는 뺀다. 공백은 하나로 줄인다"""
+    out = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            d = json.loads(line)
+            if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
+                continue
+            c = d["message"]["content"]
+            if not isinstance(c, str):
+                if any(x.get("type") == "tool_result" for x in c):
+                    continue
+                c = "\n".join(x.get("text", "") for x in c if x.get("type") == "text")
+            if not c.startswith(("Stop hook feedback", "<task-notification>")):
+                out.append(" ".join(c.split()))
+    return out
 
 
 def eta_passed(run):

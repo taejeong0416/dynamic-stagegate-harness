@@ -6,6 +6,7 @@
 """
 import difflib
 import hashlib
+import json
 import re
 import shutil
 import statistics
@@ -18,7 +19,7 @@ from . import parts as PT
 from . import records, score
 from .checks import (BUILTIN, CHECKS, FIRST_REVIEW, RE_REVIEW, STAGE_CHECKS, TAGS, applies, call_reviewer,
                      load_part_checks)
-from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
+from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, git_path, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
 PROPOSALS = GATE_DIR / "proposals"
@@ -491,6 +492,40 @@ def proposal_path(hid):
     return PROPOSALS / f"{hid}.md"
 
 
+# 사용자가 직접 요청한 구조 변경의 근거. 사용자가 줄이라고 한 변경에 검토자가 빠지는 검사마다 진단 수치를 요구해
+# 제안서를 여섯 번 고쳤다(메디테이블 H002). guard가 인용을 이 세션 사용자 입력에서 확인하면 검토자는 인용을 근거로 받는다
+DECISION = "사용자 결정"
+QUOTE = re.compile(r"\"([^\"\n]+)\"|“([^”\n]+)”")
+
+
+def decision_quotes(text):
+    """제안서 '사용자 결정' 절의 따옴표 인용. 공백은 하나로 줄인다"""
+    found = QUOTE.findall("\n".join(sections(text).get(DECISION, [])))
+    return [" ".join((a or b).split()) for a, b in found if (a or b).strip()]
+
+
+def decision_mark(hid):
+    """guard가 인용을 확인한 기록(git 폴더). 인용이 바뀌면 해시가 달라져 다시 확인해야 한다"""
+    return git_path(f"gate-decisions/{hid}.json")
+
+
+def quotes_hash(quotes):
+    return hashlib.sha256("\n".join(quotes).encode("utf-8")).hexdigest()[:12]
+
+
+def decision_note(hid, text):
+    """검토자 지시문에 붙일 말. 인용이 없으면 빈 글"""
+    quotes = decision_quotes(text)
+    if not quotes:
+        return ""
+    mark = decision_mark(hid)
+    ok = mark.exists() and json.loads(mark.read_text(encoding="utf-8")).get("hash") == quotes_hash(quotes)
+    if ok:
+        return (f" 제안서의 '{DECISION}' 절에 적은 인용은 hook이 이번 세션의 사용자 입력에 있는 것을 확인했다. 빼거나 푸는 변경의 "
+                "근거 칸이 이 인용을 가리키면 진단 수치 근거를 요구하지 않고, 인용이 그 변경을 요구하거나 허락하는지만 본다.")
+    return f" 제안서의 '{DECISION}' 절 인용은 사용자 입력에서 확인되지 않았다. 이 인용을 푸는 변경의 근거로 받지 않는다."
+
+
 def proposal_config(text):
     m = re.search(r"^## 새 구조\s*\n+```toml\n(.*?)\n```", text, re.S | re.M)
     return m.group(1) if m else None
@@ -780,6 +815,7 @@ def check_proposal(flow, hid, allow_review):
         prompt += RE_REVIEW + " 앞 검토 지적: " + " / ".join(rec["missing"])
     else:
         prompt += FIRST_REVIEW
+    prompt += decision_note(hid, text)
     result, meta = call_reviewer(prompt, CFG["review"].get("model"))
     if (not result["pass"] and result["missing"] and CFG["review"].get("formats_block", True) is False
             and all(m.lstrip().startswith(TAGS["formats"]) for m in result["missing"])):

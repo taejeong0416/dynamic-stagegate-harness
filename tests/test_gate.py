@@ -1251,6 +1251,34 @@ class FeatureTest(Repo):
         r = self.gate("check-proposal", "H001", "--review")
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_제안서의_사용자_결정_인용은_guard가_세션_입력에서_확인해야_검토자가_근거로_받는다(self):
+        self.git("checkout", "-q", ".gate/config.toml")
+        self.gate("propose", "H001")
+        shutil.rmtree(self.root / ".gate" / "proposals" / "H001" / "parts" / "diff-review")
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 사용자 결정\n\n- \"하네스 극도로 간소화해\" (2026-11-19)\n\n"
+                   "## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| diff-review를 뺀다 | 사용자 결정 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        log = self.root / "t.jsonl"
+
+        def guard(*prompts):
+            rows = [{"type": "user", "message": {"content": p}} for p in prompts]
+            rows.append({"type": "user", "isMeta": True, "message": {"content": "하네스 극도로 간소화해"}})
+            log.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
+            cmd = "python -X utf8 .gate/gate.py check-proposal H001 --review"
+            r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "guard"], self.root,
+                    json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}, "transcript_path": str(log)}),
+                    ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+            return r.stdout
+
+        self.assertIn("이 세션의 사용자 입력에 없다: 하네스 극도로 간소화해", guard("다른 말"))
+        self.reviewer_says(False, ["[결함] 근거가 없다"])
+        self.gate("check-proposal", "H001", "--review")
+        self.assertIn("사용자 입력에서 확인되지 않았다", self.prompts()[-1])
+        self.assertEqual(guard("구조 바꿔. 하네스  극도로 간소화해 문서가 제일 중요해", "진행해"), "")
+        self.reviewer_says(True)
+        self.assertEqual(self.gate("check-proposal", "H001", "--review").returncode, 0)
+        self.assertIn("hook이 이번 세션의 사용자 입력에 있는 것을 확인했다", self.prompts()[-1])
+
     def test_제안서로_부품을_빼면_adopt가_부품과_lock과_구조를_함께_바꾼다(self):
         self.git("checkout", "-q", ".gate/config.toml")
         self.gate("propose", "H001")
