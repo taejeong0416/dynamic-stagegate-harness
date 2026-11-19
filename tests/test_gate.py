@@ -859,6 +859,20 @@ class MlTest(Repo):
         self.assertEqual((rev["IMPLEMENT"]["exempt"], rev["IMPLEMENT"]["pass"]), ("예(로컬 1분, 서버 없음)", True))
         self.assertIn("'가벼운 실행'이 '예'인데", self.prompts()[0])  # 그 주장이 맞는지는 PLAN 검토자가 본다
 
+    def test_부모가_가벼운_실행으로_건너뛴_코드는_이어진_계획의_검토에_넘긴다(self):
+        self.to_implement("예(로컬 1분, 서버 없음)")
+        self.implement("x = 7\n")
+        self.assertIn("P001 t: RUN", self.gate("next", "P001").stdout)
+        code = ("import sys; sys.path.insert(0, '.gate'); from gatekit.core import load; "
+                "from gatekit.checks import unreviewed_parent\nf = load()\n"
+                "for st in ('IMPLEMENT', 'PLAN'):\n"
+                "    print(st, repr(unreviewed_parent({'p': {'from': 'P001'}, 'flow': f, 'state': st})))")
+        r = run([*PY, "-c", code], self.root)
+        impl, plan = r.stdout.splitlines()
+        self.assertIn("# 부모 계획 P001의 검토받지 않은 코드(가벼운 실행으로 IMPLEMENT 검토를 건너뜀", impl, r.stderr)
+        self.assertIn("+x = 7", impl)
+        self.assertEqual(plan, "PLAN ''")  # 검토받은 상태는 넘기지 않는다
+
     def test_결과_파일은_틀_경로를_빼고_조기_종료_파일이_있으면_나머지_없이_넘어간다(self):
         self.to_implement()
         self.implement("x = 7\n")

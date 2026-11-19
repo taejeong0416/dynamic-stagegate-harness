@@ -14,8 +14,9 @@ import shlex
 import shutil
 import subprocess
 
-from .core import (CFG, GATE_DIR, ROOT, bullets, body, changed_since, dirty_code, filled, first, git, git_path, is_code, is_test,
-                   new_numbers, now, num_value, plan_files, plan_hash, result_paths, result_status, snapshot, tables)
+from .core import (CFG, CLOSED, GATE_DIR, ROOT, bullets, body, cfg_for, changed_since, dirty_code, filled, first, git, git_path,
+                   is_code, is_test, new_numbers, now, num_value, plan_files, plan_hash, plan_text, result_paths, result_status,
+                   sections, snapshot, tables)
 
 CHECKS = {}
 
@@ -429,6 +430,22 @@ def plan_diff(ctx, base=None):
     return "\n".join(head) + body_, body_
 
 
+def unreviewed_parent(ctx):
+    """--from으로 이은 부모 계획이 같은 상태의 검토를 면제(가벼운 실행)로 건너뛰었으면 그 상태에서 바뀐 부모의 코드 diff.
+    가벼운 실행의 결과가 이어진 계획의 무거운 실행에 쓰일 때 그 코드도 한 번은 검토받게 한다"""
+    from .records import all_plans
+    pid, st = ctx["p"].get("from") or "", ctx["state"]
+    q = all_plans(ctx["flow"]).get(pid)
+    if not q or not (q.get("review", {}).get(st) or {}).get("exempt"):
+        return ""
+    start = first(q, st)["commit"]
+    end = q["history"][-1][2] if q["state"] in CLOSED else "HEAD"
+    files = plan_files(sections(plan_text(q)), cfg_for(q))
+    d = git("diff", f"{start}..{end}", "--", *files) if files else ""
+    return (f"\n\n# 부모 계획 {pid}의 검토받지 않은 코드(가벼운 실행으로 {st} 검토를 건너뜀, {start}..{end}). 이 계획의 결과가 "
+            f"이 코드에 기대므로 함께 본다\n{d}") if d.strip() else ""
+
+
 CITE_DEFAULT = r"\b[A-Z]+\d{3}\b"  # 계획 번호(P001)와 같은 꼴의 참조
 
 
@@ -549,7 +566,7 @@ def review_check(ctx, st):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
     fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state}
     if uses_diff:
-        diff = plan_diff(ctx, base)[0]
+        diff = plan_diff(ctx, base)[0] + ("" if base else unreviewed_parent(ctx))
         f = git_path(f"gate-review/{ctx['pid']}.diff")
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(diff, encoding="utf-8")
