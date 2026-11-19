@@ -16,7 +16,8 @@ from datetime import datetime
 
 from . import parts as PT
 from . import records, score
-from .checks import BUILTIN, CHECKS, STAGE_CHECKS, applies, call_reviewer, load_part_checks
+from .checks import (BUILTIN, CHECKS, FIRST_REVIEW, RE_REVIEW, STAGE_CHECKS, TAGS, applies, call_reviewer,
+                     load_part_checks)
 from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
@@ -772,9 +773,18 @@ def check_proposal(flow, hid, allow_review):
         return []
     if not allow_review:
         return [f"검토자 호출 1회(약 1분)가 필요하다. check-proposal {hid} --review로 다시 실행한다"]
-    result, meta = call_reviewer(REVIEW.format(path=path.relative_to(ROOT).as_posix(),
-                                               diag=diag.relative_to(ROOT).as_posix()), CFG["review"].get("model"))
-    flow["proposals"][hid] = {"hash": h, "pass": bool(result["pass"]), "missing": result["missing"], "at": now(), **meta}
+    prompt = REVIEW.format(path=path.relative_to(ROOT).as_posix(), diag=diag.relative_to(ROOT).as_posix())
+    if rec and not rec["pass"] and rec.get("missing"):  # 재검토는 앞 지적이 고쳐졌는지와 고친 곳만 본다
+        prompt += RE_REVIEW + " 앞 검토 지적: " + " / ".join(rec["missing"])
+    else:
+        prompt += FIRST_REVIEW
+    result, meta = call_reviewer(prompt, CFG["review"].get("model"))
+    if (not result["pass"] and result["missing"] and CFG["review"].get("formats_block", True) is False
+            and all(m.lstrip().startswith(TAGS["formats"]) for m in result["missing"])):
+        result = {"pass": True, "missing": result["missing"]}  # 형식 지적만 남으면 계획 검토와 같이 넘긴다
+    fails = 0 if result["pass"] else (rec.get("fails", 0) if rec and not rec["pass"] else 0) + 1
+    flow["proposals"][hid] = {"hash": h, "pass": bool(result["pass"]), "missing": result["missing"], "at": now(), **meta,
+                              "fails": fails}
     return [] if result["pass"] else [f"검토: {m}" for m in result["missing"]] or ["검토: FAIL"]
 
 
@@ -827,6 +837,13 @@ def review_due(flow):
     ev = sum(1 for e in read_events(since) if e["kind"] in ("guard", "stop"))
     if ev >= CFG["project"]["review_every_events"]:
         why.append(f"마지막 구조 변경 뒤 hook이 {ev}번 막았다")
+    cap = CFG["project"].get("review_fail_cap", 0)
+    for pid, p in flow["plans"].items():
+        if p["state"] in CLOSED:
+            continue
+        for st, rev in p.get("review", {}).items():
+            if cap and rev.get("fails", 0) >= cap:
+                why.append(f"{pid} {st} 검토가 연달아 {rev['fails']}번 FAIL했다")
     if CFG["stages"] and hz.get("stage") != flow.get("stage"):
         why.append(f"프로젝트 단계가 {hz.get('stage')}에서 {flow.get('stage')}로 바뀌었다")
     if not (GATE_DIR / "PROFILE.md").exists():

@@ -627,8 +627,9 @@ def review_check(ctx, st):
             and all(m.lstrip().startswith(TAGS["formats"]) for m in result["missing"])):
         result = {"pass": True, "missing": result["missing"]}  # [review] formats_block = false면 형식 지적만으로는 막지 않는다
         ctx.setdefault("notes", []).append(f"{state} 검토에 형식 지적만 남아 넘겼다: " + " / ".join(result["missing"]))
+    fails = 0 if result["pass"] else (rev.get("fails", 0) if rev and not rev["pass"] else 0) + 1  # 연달아 FAIL한 수
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
-                                         "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
+                                         "missing": result["missing"], "at": now(), **meta, "calls": calls + 1, "fails": fails,
                                          "spent": round(spent + (meta.get("cost") or 0), 6), **tags}
     if result["pass"]:
         passed.write_text(text, encoding="utf-8")

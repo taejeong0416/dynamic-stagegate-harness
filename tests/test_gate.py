@@ -1081,6 +1081,31 @@ class FeatureTest(Repo):
         self.assertEqual((rev["SPEC"]["calls"], rev["SPEC"]["spent"], rev["SPEC"]["model"]), (2, 1.0, "sonnet/high"))
         self.assertIn("| feature | SPEC | 2 | 1.00 | sonnet/high |", self.gate("diagnose").stdout)
 
+    def test_같은_상태_검토가_연달아_FAIL하면_구조_점검을_지시하고_통과하면_센_수를_지운다(self):
+        self.gate("start", "--kind", "feature", "--title", "f")
+        self.edit("plans/P001.md", ("## 요구사항\n", "## 요구사항\n\nok를 둔다.\n"),
+                  ("| 기준 | 확인 방법 |\n|---|---|", "| 기준 | 확인 방법 |\n|---|---|\n| ok가 있다 | 새 테스트 |"),
+                  ("## 범위 밖\n", "## 범위 밖\n\n없음\n"))
+        self.reviewer_says(False, ["[결함] 경계 사례가 없다"])
+        for old, new in (("ok를", "ok1을"), ("ok1을", "ok2를")):
+            out = self.gate("next", "P001", "--review").stdout
+            self.assertNotIn("연달아", out)
+            self.edit("plans/P001.md", (old, new))
+        out = self.gate("next", "P001", "--review").stdout
+        self.assertIn("SPEC 검토가 연달아 3번 FAIL했다", out)
+        self.assertIn("abandon하고 start --from P001로 잇는다", out)
+        self.assertIn("적용하고 바꾼 것을 보고한다", out)  # approval 기본값 auto는 묻지 않는다
+        r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "session"], self.root, "{}",
+                ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("[하네스 점검 권장] P001 SPEC 검토가 연달아 3번 FAIL했다", ctx)
+        self.assertIn("묻지 않고 evolve skill로 진단해", ctx)
+        self.reviewer_says(True)
+        self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
+        rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
+        self.assertEqual((rev["SPEC"]["fails"], rev["SPEC"]["calls"]), (0, 4))
+        self.assertNotIn("연달아", self.gate("diagnose").stdout)
+
     def test_통과한_계획을_고치면_통과한_원문과의_diff로_바뀐_곳만_다시_본다(self):
         self.feature_to_test()
         spec = "'요구사항', '수용 기준', '범위 밖' 절을 검토한다"
@@ -1181,6 +1206,27 @@ class FeatureTest(Repo):
                      "[review] tools: Bash가 늘어난다", "[review] model: 기본에서 haiku로 낮아진다",
                      "[review] effort: high에서 low로 낮아진다", "[review] context_full: 바뀐 설정(6000에서 9000)"):
             self.assertIn(line, diag)
+
+    def test_제안서_재검토는_앞_지적만_넘기고_형식_지적만_남으면_formats_block에_따라_넘긴다(self):
+        self.git("checkout", "-q", ".gate/config.toml")
+        self.gate("propose", "H001")
+        self.edit(".gate/proposals/H001/parts/chore/part.toml", ("max_files = 5", "max_files = 4"))
+        self.write(".gate/proposals/H001.md", "# H001 x\n\n## 바꾸는 것\n\n| 바꾸는 것 | 근거 |\n|---|---|\n| chore 상한 4 | 없음 |\n\n"
+                   "## 진행 중인 계획\n\n없음\n")
+        self.reviewer_says(False, ["[결함] 근거가 없다"])
+        self.assertIn("검토: [결함] 근거가 없다", self.gate("check-proposal", "H001", "--review").stdout)
+        self.assertIn("이번 검토에서 빠진 것을 모두 한 번에 낸다", self.prompts()[-1])
+        self.edit(".gate/proposals/H001.md", ("| 없음 |", "| P001 |"))
+        self.reviewer_says(False, ["[형식] 출처가 없다"])
+        self.assertEqual(self.gate("check-proposal", "H001", "--review").returncode, 1)
+        self.assertIn("이 검토는 재검토다", self.prompts()[-1])
+        self.assertIn("앞 검토 지적: [결함] 근거가 없다", self.prompts()[-1])
+        state = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["proposals"]["H001"]["fails"], 2)
+        self.edit(".gate/config.toml", ("[review]\n", "[review]\nformats_block = false\n"))  # 지금 구조의 설정을 따른다
+        self.edit(".gate/proposals/H001.md", ("| P001 |", "| P001 기록 |"))
+        r = self.gate("check-proposal", "H001", "--review")
+        self.assertEqual(r.returncode, 0, r.stdout)
 
     def test_제안서로_부품을_빼면_adopt가_부품과_lock과_구조를_함께_바꾼다(self):
         self.git("checkout", "-q", ".gate/config.toml")

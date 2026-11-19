@@ -133,6 +133,9 @@ def cmd_next(a, flow):
             if not m.startswith("검토자 호출"):  # 하네스 점검 자료. --review로 다시 부르라는 안내는 뺀다
                 log_event("next", m.splitlines()[0], plan=pid, plan_kind=p["kind"], state=state,
                           part=ctx.get("blame", {}).get(m, ""))
+        fails, cap = p.get("review", {}).get(state, {}).get("fails", 0), cfg_for(p)["project"].get("review_fail_cap", 0)
+        if cap and fails >= cap and any(m.startswith("검토:") for m in miss):
+            print(review_cap_text(pid, state, fails))
         sys.exit(1)
     for note in ctx.get("notes", []):
         print(note)
@@ -157,6 +160,15 @@ def cmd_next(a, flow):
             print(f"  계획 색인 {records.REC['index']}에 행을 더했다. 상태 파일과 함께 커밋한다")
     else:
         show_todo(pid, p)
+
+
+def review_cap_text(pid, state, fails):
+    """같은 상태의 검토가 연달아 막힐 때의 안내. 고칠 때마다 새 지적이 나오면 계획보다 구조를 먼저 의심한다"""
+    ask = "적용하고 바꾼 것을 보고한다" if CFG["project"].get("approval") != "user" else "사용자 승인을 받아 적용한다"
+    return (f"\n{state} 검토가 연달아 {fails}번 FAIL했다. 남은 지적이 구현을 틀리게 하거나 확인할 수 없게 만드는 결함이면 "
+            f"고쳐서 다시 넘긴다. 고칠 때마다 더 세밀한 경계 사례가 새로 나오는 것이면 구조 문제다. evolve skill로 검토 "
+            f"지시문에 FAIL 기준을 넣거나 세부 확인을 뒤 상태(테스트를 먼저 쓰는 상태)로 옮기는 제안서를 써서 {ask}. "
+            f"새 구조를 이 작업에 쓰려면 {pid}를 abandon하고 start --from {pid}로 잇는다.")
 
 
 def closed(flow):

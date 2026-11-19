@@ -457,8 +457,10 @@ def context(event):
     from .evolve import review_due
     why = review_due(flow)
     if why:
-        parts.append("[하네스 점검 권장] " + "; ".join(why) + ". 사용자에게 점검할지 한 번 묻고, 하기로 하면 evolve skill로 "
-                     "진단하고 구조 변경 제안서를 쓴다. 지금 요청이 급하면 그 일을 먼저 한다.")
+        how = ("묻지 않고 evolve skill로 진단해 구조 변경 제안서를 쓰고, check-proposal을 통과하면 적용한 뒤 바꾼 것을 보고한다"
+               if P.get("approval") != "user" else
+               "사용자에게 점검할지 한 번 묻고, 하기로 하면 evolve skill로 진단하고 구조 변경 제안서를 쓴다")
+        parts.append("[하네스 점검 권장] " + "; ".join(why) + f". {how}. 지금 요청이 급하면 그 일을 먼저 한다.")
     from .checks import stage_due
     if stage_due(flow):
         parts.append(stage_due(flow))

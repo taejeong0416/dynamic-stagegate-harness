@@ -36,6 +36,8 @@ DEFAULTS = {
                   ".githooks/"],
     "harness_prefix": "harness:",
     "max_visits": 3,
+    # 같은 상태의 검토가 연달아 이만큼 FAIL하면 next가 구조 점검을 지시하고 SessionStart도 점검을 권한다. 0이면 끈다
+    "review_fail_cap": 3,
     "files_section": "변경 파일",
     "unreviewed": [],
     # 구조 변경(adopt) 승인 방식. auto는 check-proposal(lint, 재생, 검토자)을 통과하면 에이전트가 바로 적용하고,
