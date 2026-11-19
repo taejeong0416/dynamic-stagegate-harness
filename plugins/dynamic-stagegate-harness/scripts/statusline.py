@@ -9,6 +9,7 @@ python -X utf8 statusline.py               (statusLine이 부르는 형태) stdi
 설정 폴더의 고정 경로(stagegate-statusline.py)에 사본을 두고 그 경로를 적는다. 이미 다른 statusLine(claude-dashboard 같은)이
 있으면 지우지 않고, 사본이 그 명령을 먼저 돌려 출력한 뒤 아래에 계획 줄을 붙인다. 앞 명령은 stagegate-statusline.json에 남긴다.
 계획 줄은 작업 폴더의 .gate/gate.py status --line 출력이고, 하네스가 없는 폴더에서는 앞 명령의 출력만 나온다.
+status --line이 실패하면(그 옵션이 없는 예전 엔진 따위) 상태 파일과 config.toml을 직접 읽어 같은 모양으로 그린다.
 """
 import json
 import os
@@ -16,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 NAME = "stagegate-statusline"
@@ -48,6 +50,32 @@ def paint(line):
             + (f"  {esc('1;38;5;222', m.group(3))}" if m.group(3) else ""))
 
 
+def plan_lines(d):
+    """status --line을 쓸 수 없을 때 상태 파일과 지금 구조로 그린 줄. 계획이 쓰는 구조 버전이 아니라 지금 구조의 경로를 쓴다"""
+    cfg = tomllib.loads((Path(d) / ".gate" / "config.toml").read_text(encoding="utf-8"))
+    flow = json.loads((Path(d) / cfg.get("project", {}).get("state_file", ".gate/state.json")).read_text(encoding="utf-8"))
+    out = []
+    for pid, p in flow.get("plans", {}).items():
+        if p.get("state") in ("DONE", "ABANDONED"):
+            continue
+        order, visits, bar = cfg.get("kinds", {}).get(p.get("kind"), {}).get("states", []), p.get("visits", {}), []
+        cur = order.index(p["state"]) if p.get("state") in order else len(order)
+        for i, st in enumerate(order):
+            if i == cur:
+                bar.append(f"[{st} {visits[st]}회차]" if visits.get(st, 1) > 1 else f"[{st}]")
+            elif i < cur and visits.get(st):
+                bar.append(f"{st} ✓")
+            else:
+                bar.append(f"{st} 건너뜀" if i < cur and st in p.get("skipped", []) else st)
+        eta = f"  {p['run']['eta']}쯤 끝남" if p.get("run") else ""
+        out.append(f"{pid} {p.get('kind')}  " + " → ".join(bar + ["DONE"]) + eta)
+    out = out or ["계획 없음"]
+    stage = next((s for s in cfg.get("stages", []) if s.get("n") == flow.get("stage")), None)
+    if stage:
+        out[0] = f"{stage['n']}단계 {stage.get('name', '')}".rstrip() + " │ " + out[0]
+    return out
+
+
 def render():
     raw = sys.stdin.buffer.read().decode("utf-8", "replace")
     try:
@@ -66,13 +94,20 @@ def render():
     ws = info.get("workspace") or {}
     d = ws.get("project_dir") or ws.get("current_dir") or info.get("cwd")
     if d and (Path(d) / ".gate" / "gate.py").is_file():
+        lines = None
         try:
             r = subprocess.run([sys.executable, "-X", "utf8", ".gate/gate.py", "status", "--line"], cwd=d,
                                capture_output=True, timeout=3)
             if r.returncode == 0:
-                out += [paint(x) for x in r.stdout.decode("utf-8", "replace").strip().split("\n") if x]
+                lines = [x for x in r.stdout.decode("utf-8", "replace").strip().split("\n") if x]
         except (OSError, subprocess.SubprocessError):
             pass
+        if lines is None:
+            try:
+                lines = plan_lines(d)
+            except (OSError, ValueError, KeyError, TypeError):
+                lines = ["stagegate 상태를 읽지 못했다(gate.py status --line 실패)"]
+        out += [paint(x) for x in lines]
     sys.stdout.buffer.write(("\n".join(out) + "\n").encode("utf-8"))
 
 

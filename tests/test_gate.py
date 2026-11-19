@@ -1330,6 +1330,15 @@ class StatuslineTest(Repo):
         self.assertEqual(self.settings()["statusLine"], {"type": "command", "command": "echo dash", "padding": 0})
         self.assertFalse(copy.exists())
 
+    def test_status_line을_쓸_수_없는_예전_엔진이면_상태_파일을_직접_읽어_그린다(self):
+        self.setup_harness()
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.write(".gate/gate.py", "import sys\nsys.exit('error: unrecognized arguments: --line')\n")
+        out = self.statusline(stdin=json.dumps({"cwd": str(self.root)})).stdout
+        self.assertIn("P001 chore", out)
+        self.assertIn("IMPLEMENT", out)
+        self.assertIn("RECORD", out)
+
     def test_앞_statusline이_없으면_켤_때_새로_적고_끌_때_지운다(self):
         self.statusline("--install")
         self.assertIn("stagegate-statusline.py", self.settings()["statusLine"]["command"])
