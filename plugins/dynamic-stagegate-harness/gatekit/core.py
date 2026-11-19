@@ -465,10 +465,16 @@ PATH_TOKEN = re.compile(r"[\w.][\w./-]*")
 
 def plan_files(s, cfg=None):
     """계획이 고치겠다고 적은 코드 파일(계획 구조 버전의 files_section 절 경로 중 code 패턴에 맞는 것).
-    표가 있으면 첫 칸만 본다. 설명 칸에 적은 경로를 고칠 파일로 치지 않기 위해서다"""
+    표가 있으면 머리 행 이름에 '파일'이 든 첫 칸(없으면 첫 칸)만 본다. 설명 칸이나 조건 칸에 적은 경로를 고칠 파일로 치지
+    않기 위해서다"""
     lines = s.get((cfg or CFG)["project"]["files_section"], [])
-    rows = [r for t in tables(lines) for r in t if r]
-    text = "\n".join(r[0] for r in rows) if rows else "\n".join(lines)
+    heads = [[c.strip() for c in x.strip().strip("|").split("|")] for i, x in enumerate(lines)
+             if x.startswith("|") and (i == 0 or not lines[i - 1].startswith("|"))]
+    cells = []
+    for head, t in zip(heads, tables(lines)):
+        col = next((i for i, h in enumerate(head) if "파일" in h), 0)
+        cells += [r[col] for r in t if len(r) > col]
+    text = "\n".join(cells) if cells else "\n".join(lines)
     return sorted({t.strip("`") for t in PATH_TOKEN.findall(text.replace("`", " ")) if is_code(t.strip("`"), cfg)})
 
 

@@ -188,7 +188,7 @@ flowchart LR
 |---|---|
 | filled | 절이 비어 있지 않다. items를 주면 그 bullet 항목마다 값이 있다 |
 | table | 절의 표에 칸이 모두 찬 행이 min_rows개 이상 있다 |
-| files_listed | "변경 파일" 절에 code 패턴에 맞는 파일이 있다 |
+| files_listed | files_section 절("변경 파일", 실험 경로는 "행 조건 대조표")에 code 패턴에 맞는 파일이 있다. 표는 머리 행 이름에 "파일"이 든 첫 칸만 본다 |
 | files_changed | 이 상태에 처음 들어온 뒤의 커밋에서 그 파일이 바뀌었다(any = true면 하나 이상) |
 | clean | 코드에 커밋하지 않은 변경이 없다 |
 | numbers | 코드에 새로 넣은 숫자(0과 1 제외, subscript 첨자 제외)가 근거 표 첫 칸에 있다 |

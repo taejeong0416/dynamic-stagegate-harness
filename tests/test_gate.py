@@ -834,6 +834,14 @@ class MlTest(Repo):
         self.edit(self.PLAN, ("| 값 | 쓰는 곳 | 근거 |\n|---|---|---|", "| 값 | 쓰는 곳 | 근거 |\n|---|---|---|\n| 7 | src/m.py | x |"))
         self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)  # 숫자 검사를 지나 IMPLEMENT 검토만 남았다
 
+    def test_행_조건_대조표는_구현_파일_칸의_경로만_고칠_파일로_본다(self):
+        code = ("import sys; sys.path.insert(0, '.gate'); from gatekit.core import plan_files, sections, CFG\n"
+                "s = sections('# P\\n\\n## 행 조건 대조표\\n\\n| 아이디어 행의 조건 | 구현 파일 | 함수나 위치 |\\n|---|---|---|\\n"
+                "| 학습률을 낮춘다 | src/m.py | main |\\n| src/x.py와 같은 조건 | src/n.py | f |\\n')\n"
+                "print(' '.join(plan_files(s, CFG)))")
+        r = run([*PY, "-c", code], self.root)
+        self.assertEqual(r.stdout.split(), ["src/m.py", "src/n.py"], r.stderr)
+
     def test_가벼운_실행은_구현_검토를_건너뛰고_면제를_검토_기록에_남긴다(self):
         self.to_implement("예(로컬 1분, 서버 없음)")
         self.implement("x = 7\n")
