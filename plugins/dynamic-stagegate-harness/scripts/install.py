@@ -28,6 +28,7 @@ SHIM = '''"""gate 명령 진입점. 프로젝트 루트에서 python -X utf8 .ga
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # 엔진 폴더에 __pycache__를 남기지 않는다
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gatekit.cli import main  # noqa: E402
 
@@ -97,6 +98,12 @@ def write_githooks(target):
     subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=target, check=True)
 
 
+def ignored(target, *paths):
+    """paths 가운데 .gitignore에 걸리는 것"""
+    r = subprocess.run(["git", "check-ignore", "--", *paths], cwd=target, capture_output=True, text=True, encoding="utf-8")
+    return set(r.stdout.split())
+
+
 def read_inputs(a):
     """(덮어쓰기, 답). --local 파일에 --answer를 더한다. 답의 쉼표는 여러 답이다"""
     local = tomllib.loads(Path(a.local).read_text(encoding="utf-8")) if a.local else {}
@@ -142,8 +149,11 @@ def main():
         if busy and engine_hash(gate_dir / "gatekit") != before:
             print(f"경고: 진행 중인 계획 {', '.join(busy)}는 구조 버전은 그대로 쓰지만 검사 코드가 바뀐 엔진으로 넘어간다. "
                   "status와 SessionStart가 '엔진 바뀜'으로 알린다. 가능하면 이 계획들을 끝낸 뒤 갱신한다.")
-        print("엔진, GATE.md, 라이브러리, git hook을 갱신했다. 하네스 커밋으로 남긴다: "
-              "git add .gate/gatekit .gate/gate.py .gate/GATE.md .gate/library .githooks, git commit -m \"harness: gatekit 갱신\"")
+        engine = [".gate/gatekit", ".gate/gate.py", ".gate/GATE.md", ".gate/library", ".githooks"]
+        keep = [x for x in engine if x not in ignored(target, *engine)]
+        print("엔진, GATE.md, 라이브러리, git hook을 갱신했다. " + (
+            f"하네스 커밋으로 남긴다: git add {' '.join(keep)}, git commit -m \"harness: gatekit 갱신\"" if keep else
+            "엔진 복사본을 git이 추적하지 않아 커밋할 것이 없다."))
         if (gate_dir / "parts").exists():
             print("라이브러리에서 바뀐 부품은 python -X utf8 .gate/gate.py parts로 본다.")
         return
@@ -188,8 +198,12 @@ def main():
     print("\n하네스를 설치했다. 다음 순서로 마무리한다.")
     print("  1. 하네스 파일만 커밋한다: git add .gate .githooks, git reset .gate/state.json, "
           "git commit -m \"harness: stagegate 하네스 설치\"")
-    print("  2. 상태 파일을 따로 커밋한다: git add .gate/state.json, git commit -m \"chore: gate 상태 파일\"")
-    print("  3. python -X utf8 .gate/gate.py describe로 구조를 보고, setup skill의 인터뷰로 PROFILE.md와 첫 조정을 한다")
+    rel = state.relative_to(target).as_posix()
+    keep_state = rel not in ignored(target, rel)
+    if keep_state:
+        print(f"  2. 상태 파일을 따로 커밋한다: git add {rel}, git commit -m \"chore: gate 상태 파일\"")
+    print(f"  {3 if keep_state else 2}. python -X utf8 .gate/gate.py describe로 구조를 보고, setup skill의 인터뷰로 "
+          "PROFILE.md와 첫 조정을 한다")
 
 
 if __name__ == "__main__":

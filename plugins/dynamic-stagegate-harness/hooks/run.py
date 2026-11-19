@@ -11,6 +11,7 @@ if os.environ.get("GATE_REVIEW"):
 root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
 if not (root / ".gate" / "config.toml").is_file() or not (root / ".gate" / "gatekit").is_dir():
     sys.exit(0)
+sys.dont_write_bytecode = True  # 프로젝트의 엔진 폴더에 __pycache__를 남기지 않는다
 sys.path.insert(0, str(root / ".gate"))
 from gatekit.hooks import main  # noqa: E402
 

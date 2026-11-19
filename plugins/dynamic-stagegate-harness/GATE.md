@@ -12,7 +12,7 @@
 | `next P001 [--review]` | 지금 상태의 조건을 검사하고, 통과하면 조건이 맞는 다음 상태로 옮긴다. 조건이 맞지 않는 상태는 건너뛰고 기록한다 |
 | `back P001 <상태> --why "..." --defect <분류>` | 앞 상태로 돌아간다. 종류의 back에 지금 상태가 있으면 거기 적힌 상태로만 간다. 되돌아가는 원인의 분류(logic 코드 논리, data 데이터 형태나 누수, resource 시간과 메모리와 디스크, env 실행 환경, plan 계획이나 판정 기준)를 받아 사고로 남긴다 |
 | `incident --defect <분류> --note "..." [--plan P001] [--state <상태>] [--quote "..."]` | 통과한 뒤에 드러난 결함을 사고로 남긴다. 결과가 무효였거나 사용자가 결함을 지적했을 때 쓴다. `--quote`는 사용자가 이번 턴에 쓴 문장이어야 한다 |
-| `run P001 --eta HH:MM --basis "..."` | 실행 상태에서 예상 종료 시각과 근거를 적는다. 이때 이미 넘긴 상태의 절 기록을 고정하고, 상태 파일만 `docs: P001 실행 기록`으로 바로 커밋한다. 실행 중에 예상이 바뀌면 다시 적어 시각을 고친다. 실행 기록은 상태를 옮기면 계획의 runs 이력으로 넘어가 status와 검사에서 빠진다. 같은 실행 상태에 다시 들어오면 새로 적어야 한다 |
+| `run P001 --eta HH:MM --basis "..."` | 실행 상태에서 예상 종료 시각과 근거를 적는다. 이때 이미 넘긴 상태의 절 기록을 고정하고, 상태 파일만 `docs: P001 실행 기록`으로 바로 커밋한다(상태 파일을 git이 추적하지 않으면 커밋하지 않는다). 실행 중에 예상이 바뀌면 다시 적어 시각을 고친다. 실행 기록은 상태를 옮기면 계획의 runs 이력으로 넘어가 status와 검사에서 빠진다. 같은 실행 상태에 다시 들어오면 새로 적어야 한다 |
 | `abandon P001 --why "..."` | 계획을 그만둔다 |
 | `hold P001 --quote "..."` | 사용자가 이번 턴에 멈추라고 한 문장을 적는다. 그 문장이 든 턴에서는 stop hook이 이 계획으로 막지 않는다 |
 | `stage <n> --decision "..."` | stages가 있는 구조에서 프로젝트 단계를 바꾼다 |
@@ -161,8 +161,8 @@ review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{con
 
 | 장치 | 막는 경우 |
 |---|---|
-| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 구조 파일이나 그 파일이 든 폴더(.gate/gatekit, .gate)가 나오는 셸 명령이 쓰기, 복사, 이동, 삭제 명령이나 인터프리터를 쓸 때(gate 명령과 읽기 명령만 이은 명령은 통과). 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. glob으로 쓴 경로는 저장소에서 펼쳐 상태 파일과 구조 파일을 찾는다. adopt의 승인 문장이나 incident의 --quote 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). 부품의 `[[guard]]` pattern에 맞는 명령일 때. hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없고 sample_states 상태의 표본 경로 명령도 아닐 때 |
-| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때. 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때(PreToolUse hook이 막아 돌지 않은 명령은 세지 않는다). 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
+| guard (PreToolUse) | code 파일이 코드 상태인 계획의 files_section 절에 없는데 고칠 때(pre-commit과 같은 기준). 코드 상태인 계획이 모두 edit = "tests" 상태인데 테스트가 아닌 code 파일을 고칠 때. 상태 파일, .git/, 구조 파일(config.toml, history, gatekit, parts, local.toml, parts.lock)과 git hook을 직접 쓸 때. 구조 파일이나 그 파일이 든 폴더(.gate/gatekit, .gate)가 나오는 셸 명령이 쓰기, 복사, 이동, 삭제 명령이나 인터프리터를 쓸 때(gate 명령, 읽기 명령, 색인에서만 지우는 `git rm --cached`만 이은 명령은 통과). 상태를 gate 명령과 읽기 명령 말고 다른 방법으로 다룰 때. glob으로 쓴 경로는 저장소에서 펼쳐 상태 파일과 구조 파일을 찾는다. adopt의 승인 문장이나 incident의 --quote 문장이 이번 턴 사용자 입력에 없을 때(다른 명령과 이어도 본다). 부품의 `[[guard]]` pattern에 맞는 명령일 때. hook을 우회할 때. [remote]가 있으면 커밋하지 않은 코드나 gate run 기록 없이 ssh로 작업을 띄우거나 코드를 올릴 때, ssh로 저장소 code 파일을 그 자리에서 돌리는데 gate run 기록이 있는 실행 상태나 exec_states 상태인 계획이 없고 sample_states 상태의 표본 경로 명령도 아닐 때 |
+| stop (Stop) | 이 세션이 고친 코드, 하네스, 상태 파일에 커밋하지 않은 변경이 있을 때(.gitignore에 넣은 파일은 보지 않는다). 이번 턴에 고친 문서는 알리기만 한다. 이번 턴에 서버 작업을 띄웠거나 ssh로 저장소 코드를 run_in_background로 돌렸는데 답에 남은 시간과 끝나는 시각이 없을 때(PreToolUse hook이 막아 돌지 않은 명령은 세지 않는다). 이번 턴에 다룬 계획이 stop_states에 머물 때. 일반 질문이나 부가 작업 턴은 앞 턴의 계획 상태로 막지 않는다. 5번 연속 막으면 통과시킨다 |
 | pre-commit | 커밋할 코드 파일이 코드 상태인 계획의 files_section 절에 없을 때. 그 파일을 적은 계획이 edit = "tests" 상태인데 테스트 파일이 아닐 때. 그 파일을 적은 계획이 종류의 limit을 벗어났을 때 |
 | commit-msg | 하네스 파일과 다른 파일이 한 커밋에 섞일 때. 하네스 커밋의 메시지가 `harness:`로 시작하지 않을 때 |
 

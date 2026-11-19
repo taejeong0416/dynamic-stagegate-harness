@@ -102,7 +102,12 @@ def state_safe(cmd, state_rel=".gate/state.json"):
     일이 대회 하네스의 마지막 harness: 커밋 뒤 막힘 15번 중 9번이었다)"""
     keep = re.compile(r"gate|" + re.escape(state_rel), re.I)
     segs = split_cmd(HEREDOC.sub(lambda m: m.group(0) if keep.search(m.group(4)) else f"{NO_STATE} ; ", cmd))
-    return bool(segs) and all(READ_SEG.match(s) or CLI_SEG.match(s) or s.strip() == NO_STATE for s in segs)
+    return bool(segs) and all(READ_SEG.match(s) or CLI_SEG.match(s) or RM_CACHED.match(s) or s.strip() == NO_STATE
+                              for s in segs)
+
+
+# 색인에서만 지우는 git rm. 엔진 복사본과 상태 파일을 .gitignore에 넣은 뒤 추적을 끊을 때 쓴다(메디테이블 2026-11-19)
+RM_CACHED = re.compile(r"^\s*git(?:\s+-C\s+" + ARG + r")?\s+rm\b(?=(?:[^\"']|\"[^\"]*\"|'[^']*')*?\s--cached(?:\s|$))")
 
 
 HEREDOC = re.compile(r"\b(python3?|py)(\s+-X\s+utf8)?\s+-\s+<<\s*'?(\w+)'?\n(.*?)\n\3(?:\n|$)", re.S)

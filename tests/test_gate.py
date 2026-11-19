@@ -310,6 +310,27 @@ class FlowTest(Repo):
         self.assertIn("docs: P001 실행 기록", self.git("log", "-1", "--format=%s").stdout)
         self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD").stdout.split(), [".gate/state.json"])
 
+    def test_상태_파일을_추적하지_않으면_run과_stop이_상태_파일_커밋을_요구하지_않는다(self):
+        self.write(".gitignore", "/.gate/state.json\n")
+        self.git("rm", "-q", "--cached", ".gate/state.json")
+        self.git("add", ".gitignore")
+        self.assertEqual(self.git("commit", "-qm", "chore: 상태 파일 추적 끊기").returncode, 0)
+        self.gate("start", "--kind", "chore", "--title", "t")
+        cmd = "python -X utf8 .gate/gate.py run P001 --eta 23:59 --basis b"
+        r = self.gate(*cmd.split()[4:])
+        self.assertIn("git이 추적하지 않아 커밋하지 않았다", r.stdout, r.stdout + r.stderr)
+        rows = [{"type": "user", "message": {"content": "실행 기록을 남겨"}},
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                                               "input": {"command": cmd}}]}}]
+        log = self.root / "t.jsonl"
+        log.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in rows) + "\n", encoding="utf-8")
+        r = run([*PY, str(PLUGIN / "hooks" / "run.py"), "stop"], self.root,
+                json.dumps({"transcript_path": str(log), "session_id": "s"}), ENV | {"CLAUDE_PROJECT_DIR": str(self.root)})
+        self.assertNotIn("block", r.stdout)
+        # gate 명령과 hook은 엔진 폴더에 __pycache__를 남기지 않는다
+        run([*PY, ".gate/gate.py", "status"], self.root, env={k: v for k, v in ENV.items() if k != "PYTHONDONTWRITEBYTECODE"})
+        self.assertFalse((self.root / ".gate" / "gatekit" / "__pycache__").exists())
+
     def test_조건을_채우지_못하면_머문다(self):
         self.gate("start", "--kind", "chore", "--title", "t")
         r = self.gate("next", "P001")
@@ -1384,6 +1405,14 @@ class GuardTest(Repo):
             self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
         for cmd in ("cat .gate/state*.json", "ls .gate/*", "sed -n 1,5p .gate/gatekit/core.py", "python src/core.py"):
             self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+
+    def test_색인에서만_지우는_git_rm은_엔진과_상태_파일에도_허용한다(self):
+        for cmd in ("git rm -r -q --cached .gate/gatekit .gate/library .gate/gate.py",
+                    "git rm --cached .gate/state.json && git status --short"):
+            self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+        for cmd in ("git rm -r .gate/gatekit", "git rm --cached .gate/state.json && rm .gate/state.json",
+                    "git rm .gate/gatekit/core.py -- '--cached'"):
+            self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
 
     def user_approval(self):
         """승인 방식을 user로 바꾼다(기본은 auto)"""

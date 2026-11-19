@@ -237,6 +237,11 @@ def head():
     return git("rev-parse", "--short", "HEAD").strip()
 
 
+def tracked(path):
+    """git이 추적하는 파일인가. 상태 파일을 .gitignore에 넣은 프로젝트는 상태 파일을 커밋하지 않는다"""
+    return bool(git("ls-files", "--", path).strip())
+
+
 def changed_since(commit, *paths):
     out = git("diff", "--name-only", f"{commit}..HEAD", "--", *paths)
     return set(out.splitlines())

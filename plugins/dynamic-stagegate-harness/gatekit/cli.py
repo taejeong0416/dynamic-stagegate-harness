@@ -9,11 +9,16 @@ from pathlib import Path
 from . import evolve, records, score
 from .checks import run_checks, stage_checks, stage_due
 from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
-                   is_harness, is_test, kind_states,
+                   is_harness, is_test, kind_states, tracked,
                    load, log_event, next_state, now, parse_config, plan_files, plan_text, result_paths, save, sections, snapshot,
                    state_def, structure_problems, template_text)
 
 CLI = "python -X utf8 .gate/gate.py"
+
+
+def with_state():
+    """커밋 안내에 붙이는 말. 상태 파일을 git이 추적하지 않으면 붙이지 않는다"""
+    return "상태 파일과 함께 " if tracked(P["state_file"]) else ""
 
 
 def enter(p, state, note=""):
@@ -157,7 +162,7 @@ def cmd_next(a, flow):
     if nxt == "DONE":
         print(f"{pid} {p['title']}: 모든 상태를 지났다")
         if records.REC["index"]:
-            print(f"  계획 색인 {records.REC['index']}에 행을 더했다. 상태 파일과 함께 커밋한다")
+            print(f"  계획 색인 {records.REC['index']}에 행을 더했다. {with_state()}커밋한다")
     else:
         show_todo(pid, p)
 
@@ -175,7 +180,7 @@ def closed(flow):
     """계획이 닫히면 오래된 닫힌 계획을 보관 파일로 옮기고 색인을 다시 쓴다"""
     moved = records.settle(flow)
     if moved:
-        print(f"닫힌 계획 {', '.join(moved)}를 .gate/state-archive.jsonl로 옮겼다. 상태 파일과 함께 커밋한다")
+        print(f"닫힌 계획 {', '.join(moved)}를 .gate/state-archive.jsonl로 옮겼다. {with_state()}커밋한다")
 
 
 def freeze(p):
@@ -238,6 +243,9 @@ def cmd_run(a, flow):
     save(flow)
     print(f"{a.pid} 실행 기록: {a.eta}쯤 끝남({a.basis})")
     # 실행 기록은 바로 커밋한다. 커밋하지 않으면 stop hook이 막아 커밋만 하는 턴이 생겼다(대회 2026-11-18 P038, P040)
+    if not tracked(P["state_file"]):
+        print(f"{P['state_file']}를 git이 추적하지 않아 커밋하지 않았다")
+        return
     r = subprocess.run(["git", "commit", "-q", "-m", f"docs: {a.pid} 실행 기록", "--", P["state_file"]], cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8")
     print(f"{P['state_file']} 커밋" if r.returncode == 0 else
@@ -461,7 +469,8 @@ def cmd_adopt(a, flow):
     files = ".gate/config.toml .gate/history" + (" .gate/parts .gate/local.toml .gate/parts.lock"
                                                  if evolve.PARTS.exists() else "")
     print(f"  하네스 커밋: git add -A {files}, git commit -m \"harness: {a.hid} 구조 변경\"")
-    print("  그다음 상태 파일과 제안서를 일반 커밋으로 남긴다: git add .gate/state.json .gate/proposals")
+    print("  그다음 " + ("상태 파일과 제안서를 일반 커밋으로 남긴다: git add .gate/state.json .gate/proposals"
+                         if tracked(P["state_file"]) else "제안서를 일반 커밋으로 남긴다: git add .gate/proposals"))
 
 
 def main(argv=None):
