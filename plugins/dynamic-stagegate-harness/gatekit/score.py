@@ -15,6 +15,7 @@ DEFECTS = {"logic": "코드 논리", "data": "데이터 형태나 누수", "reso
 CARD = GATE_DIR / "scorecard.json"
 ENGINE_PART = "엔진"
 KEYS = ("blocks", "true", "false", "open")
+REVIEW_ROW = {"calls": 0, "spent": 0.0, "defects": 0, "formats": 0}
 # 제안 기준. 근거 없이 정한 값이고 [project]에서 바꾼다
 RULES = {"gate_new_plans": 2, "gate_leaks": 1, "gate_relax_false": 3, "gate_relax_window": 10, "gate_promote_true": 3}
 
@@ -96,13 +97,13 @@ def used_parts():
 
 
 def scorecard(flow):
-    """부품별 성적. 막은 횟수와 판정, covers에 해당하는 결함이 새어 나간 횟수, 검토 호출 수와 비용"""
+    """부품별 성적. 막은 횟수와 판정, covers에 해당하는 결함이 새어 나간 횟수, 검토 호출 수와 비용, 검토 지적의 결함과 형식 수"""
     card = tally(read_events(), folded())
     parts = used_parts()
     for p in parts:
         card.setdefault(p["name"], dict.fromkeys(KEYS, 0))
     for row in card.values():
-        row.update({"leaks": [], "calls": 0, "spent": 0.0})
+        row.update(REVIEW_ROW | {"leaks": []})
     for inc in flow.get("incidents", []):
         for p in parts:
             if inc["defect"] in p.get("covers", []):
@@ -111,9 +112,11 @@ def scorecard(flow):
         cfg = cfg_for(p)
         for state, rev in p.get("review", {}).items():
             name = cfg["states"].get(state, {}).get("review_part") or ENGINE_PART
-            row = card.setdefault(name, dict.fromkeys(KEYS, 0) | {"leaks": [], "calls": 0, "spent": 0.0})
+            row = card.setdefault(name, dict.fromkeys(KEYS, 0) | REVIEW_ROW | {"leaks": []})
             row["calls"] += rev.get("calls", 1)
             row["spent"] += rev.get("spent", rev.get("cost") or 0)
+            row["defects"] += rev.get("defects", 0)
+            row["formats"] += rev.get("formats", 0)
     return card
 
 
@@ -160,13 +163,14 @@ def report(flow):
                   for i in incidents[-30:]]
     else:
         lines.append("없음")
-    lines += ["", "## 부품 성적", "", "| 부품 | 막은 횟수 | 진짜 막힘 | 오탐 | 미판정 | 새어 나간 결함 | 검토 호출 | 검토 비용(USD) |",
-              "|---|---|---|---|---|---|---|---|"]
+    lines += ["", "## 부품 성적", "", "| 부품 | 막은 횟수 | 진짜 막힘 | 오탐 | 미판정 | 새어 나간 결함 | 검토 호출 | 검토 비용(USD) | 결함 지적 "
+              "| 형식 지적 |", "|---|---|---|---|---|---|---|---|---|---|"]
     for name, r in sorted(scorecard(flow).items()):
         lines.append(f"| {name} | {r['blocks']} | {r['true']} | {r['false']} | {r['open']} | "
-                     f"{', '.join(r['leaks']) or 0} | {r['calls']} | {r['spent']:.2f} |")
+                     f"{', '.join(r['leaks']) or 0} | {r['calls']} | {r['spent']:.2f} | {r['defects']} | {r['formats']} |")
     lines += ["", "판정: 막힌 뒤 구조 버전과 엔진이 그대로인 채 같은 행동이 통과했으면 진짜 막힘, 구조나 엔진이 바뀐 뒤에 통과했으면 "
-              "오탐, 다시 통과한 기록이 없으면 미판정이다. 미판정은 사용자와 함께 본다.",
+              "오탐, 다시 통과한 기록이 없으면 미판정이다. 미판정은 사용자와 함께 본다. 결함 지적과 형식 지적은 검토자가 지적 앞에 붙인 "
+              "[결함], [형식] 표시를 센다.",
               "", "## 제안 초안", "",
               "기준(근거 없이 정한 값, [project]에서 바꾼다): " + ", ".join(f"{k} = {rule(k)}" for k in RULES), ""]
     lines += [f"- {d}" for d in drafts(flow)] or ["없음"]

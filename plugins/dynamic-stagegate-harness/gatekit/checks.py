@@ -516,6 +516,8 @@ RE_REVIEW = (" 이 검토는 재검토다. (1) 앞 검토 지적이 고쳐졌는
 # 통과한 계획을 고쳐 다시 받는 검토(대회 하네스에서 back으로 PLAN에 온 16번이 모두 첫 검토를 다시 받았다)
 CHANGE_REVIEW = (" 이 검토는 앞 검토를 통과한 계획을 고친 뒤의 검토다. 통과한 원문과의 diff {diff}를 먼저 읽고, 바뀐 내용 자체의 "
                  "문제와 그 변경 때문에 계획의 다른 절과 맞지 않게 된 곳만 본다. 바뀌지 않은 내용에는 결과 해석을 바꿀 결함만 낸다.")
+# 검토 기록에 누적하는 지적 수와 지적 앞 표시. 검토가 결과를 바꾼 지적을 냈는지 부품 성적에서 본다
+TAGS = {"defects": "[결함]", "formats": "[형식]"}
 
 
 def review_check(ctx, st):
@@ -538,7 +540,8 @@ def review_check(ctx, st):
     if light.startswith("예"):  # 가벼운 실행은 검토 없이 넘기고, 그 주장이 맞는지는 앞 상태의 검토자가 본다
         p.setdefault("review", {})[state] = {"pass": True, "hash": plan_hash(text, ctx["cfg"]), "missing": [], "at": now(),
                                              "exempt": light, "model": "면제", "calls": (rev or {}).get("calls", 0),
-                                             "spent": (rev or {}).get("spent", 0), "upto": git("rev-parse", "--short", "HEAD").strip()}
+                                             "spent": (rev or {}).get("spent", 0), "upto": git("rev-parse", "--short", "HEAD").strip(),
+                                             **{k: (rev or {}).get(k, 0) for k in TAGS}}
         ctx.setdefault("notes", []).append(f"'{ex['item']}: {light}'이라 {state} 검토를 건너뛰었다(상태 파일의 검토 기록에 exempt로 남김)")
         return []
     model = st.get("review_model") or ctx["cfg"]["review"].get("model")
@@ -567,9 +570,10 @@ def review_check(ctx, st):
         prompt += FIRST_REVIEW
     result, meta = call_reviewer(prompt, model, ctx["cfg"])
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
+    tags = {k: (rev or {}).get(k, 0) + sum(m.lstrip().startswith(t) for m in result["missing"]) for k, t in TAGS.items()}
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
-                                         "spent": round(spent + (meta.get("cost") or 0), 6)}
+                                         "spent": round(spent + (meta.get("cost") or 0), 6), **tags}
     if result["pass"]:
         passed.write_text(text, encoding="utf-8")
     if uses_diff:  # 다음 검토의 diff 시작점. 실패하면 앞에서 통과한 시점을 그대로 둔다
@@ -582,7 +586,8 @@ def call_reviewer(prompt, model=None, cfg=None):
     사용자 설정을 읽지 않으므로 추론 단계는 [review] effort로 넘기고, MCP 서버와 skill 목록은 싣지 않는다.
     cfg는 계획이 쓰는 구조 버전이고, 없으면 지금 구조(제안서 검토)다"""
     rv = (cfg or CFG)["review"]
-    prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문제가 없으면 pass를 true로 둔다. "
+    prompt += (" 문제마다 file:line 근거를 붙여 missing에 한국어 한 문장씩 쓴다. 문장 맨 앞에는 [결함](고치지 않으면 실행 결과, "
+               "판정, 비교가 틀려지는 것)이나 [형식](기록 형식, 문구, 출처 표기)을 붙인다. 문제가 없으면 pass를 true로 둔다. "
                "파일을 고치지 않는다.")
     effort = rv.get("effort")
     err = ""

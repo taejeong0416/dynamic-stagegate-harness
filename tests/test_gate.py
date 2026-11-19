@@ -1071,6 +1071,21 @@ class FeatureTest(Repo):
         self.assertIn("P001 f: PLAN", self.gate("next", "P001", "--review").stdout)
         self.assertIn("이번 검토에서 빠진 것을 모두 한 번에 낸다", self.prompts()[-1])
 
+    def test_검토_지적의_결함과_형식_표시를_세어_부품_성적에_낸다(self):
+        self.feature_to_test()
+        self.assertIn("[결함](고치지 않으면 실행 결과, 판정, 비교가 틀려지는 것)", self.prompts()[0])
+        self.gate("back", "P001", "SPEC", "--why", "w", "--defect", "plan")
+        self.edit("plans/P001.md", ("ok를 둔다.", "ok를 1로 둔다."))
+        self.reviewer_says(False, ["[결함] 1의 근거가 없다", "[형식] 출처 표기가 없다", " [형식] 문구가 다르다"])
+        self.gate("next", "P001", "--review")
+        self.reviewer_says(False, ["[형식] 줄 끝이 다르다"])
+        self.gate("next", "P001", "--review")
+        rev = json.loads((self.root / ".gate" / "state.json").read_text(encoding="utf-8"))["plans"]["P001"]["review"]
+        self.assertEqual((rev["SPEC"]["defects"], rev["SPEC"]["formats"]), (1, 3))
+        out = self.gate("diagnose").stdout.split("## 부품 성적")[1]
+        self.assertIn("| 검토 비용(USD) | 결함 지적 | 형식 지적 |", out)
+        self.assertRegex(out, r"\| feature \|[^\n]* \| 1 \| 3 \|\n")
+
     def test_수용_기준마다_테스트_결과가_있어야_하고_막힌_이유가_진단에_남는다(self):
         self.feature_to_test()
         self.edit("plans/P001.md", ("| ok가 있다 | 통과 |", "| ok | 통과 |"))
