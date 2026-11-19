@@ -119,10 +119,13 @@ parts.lock에는 부품마다 버전, 출처, 파일 해시(hash), 라이브러�
 | `[kinds.<종류>]` | states(상태 순서), options(start --with로 켤 수 있는 선택), when(상태별 들를 조건), back(상태별로 돌아갈 수 있는 앞 상태), limit(이 종류로 진행할 수 있는 조건), extra_sections(상태가 쓰지 않아도 틀에 넣을 절) |
 | `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델), context(`{context}` 발췌에 담을 파일 목록), review_exempt(`{section, item}`. 그 bullet 항목이 "예"로 시작하면 검토자를 부르지 않는다) |
 | `[sections."<절>"]` | body(계획 틀에 들어갈 표나 bullet) |
-| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000) |
+| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000), formats_block(false면 [형식] 지적만 남은 FAIL은 막지 않고 알리기만 한다. 기본 true) |
 | `[remote]` | host, port, dir(학습 서버), exec_states(gate run 기록이 없어도 ssh로 저장소 코드를 그 자리에서 돌려도 되는 상태), sample_states와 sample_pattern(그 상태에서는 명령에 sample_pattern에 맞는 표본 경로가 들어간 ssh 실행만 연다. experiment 부품은 IMPLEMENT와 results/P###_sample) |
+| `[[stages]]` | n(단계 번호), name, kinds(그 단계에서 시작할 수 있는 종류), exit(다음 단계로 넘어갈 조건 검사 목록), require(그 단계에서 새 계획을 시작하기 전에 통과해야 하는 검사 목록) |
 
 checks의 검사와 review_when에는 `only = [종류]`나 `skip = [종류]`를 붙여 적용할 종류를 고른다.
+
+단계의 exit와 require에는 계획 파일 없이 도는 검사만 쓴다. 기본 검사로는 field, doc_size, recent_closed가 있고, 프로젝트 고유의 조건은 부품 checks.py의 검사로 쓴다. 지금 단계의 exit 검사가 모두 통과하면 SessionStart와 `start`가 "[단계 전환 검토]"를 띄우고, 에이전트는 다음 단계로 넘어갈지 사용자에게 묻는다. 단계를 바꾸지는 않고 막지도 않는다. require 검사가 통과하지 않으면 `start`가 그 단계의 새 계획을 막고, `any_stage = true`인 종류는 막지 않는다. recent_closed는 이번 단계에서 닫힌 계획 가운데 최근 n개(기본 1)가 모두 조건에 맞는지 본다. kind로 종류를, states(기본 DONE)로 닫힌 상태를 고르고, item("절: 항목")과 pattern을 주면 그 항목 값이 정규식에 맞아야 한다. 예를 들어 `exit = [{check = "recent_closed", n = 3, kind = "tune", item = "결정: 고른 갈래", pattern = "기각"}]`이면 tune 계획이 세 번 연달아 기각으로 끝났을 때 전환 검토를 띄운다.
 
 when의 조건 키는 option(켠 선택), changed(계획 시작 뒤 바뀐 파일 패턴), max_files(계획의 코드 파일 수 상한), not, any다. 예를 들어 `MIGRATE = {changed = ["migrations/*"]}`는 migrations/가 바뀐 계획만 MIGRATE에 들르게 한다.
 
@@ -148,7 +151,7 @@ covers 검사는 from 절 표의 첫 칸이 모두 section 절 표의 첫 칸에
 
 command 검사의 `use`는 `[project]`의 test나 affected를 가리키고, affected가 비어 있으면 test를 쓴다. 명령 속 `{files}`는 계획의 코드 파일로 바뀌고, `optional = true`면 명령이 없을 때 통과한다. `expect = "fail"`이면 테스트가 돌고 실패해야 한다. 명령의 프로그램을 찾지 못하거나 종료 코드가 `reject`에 있으면 막는데, `reject`의 기본값은 4, 5, 126, 127이다. 같은 명령과 같은 테스트 파일로 실패를 확인한 기록이 있으면 다시 돌리지 않는다. 그래서 구현한 뒤 back으로 TESTFIRST나 REPRO에 돌아와도 테스트를 고치지 않았다면 다시 넘길 수 있다.
 
-검토자는 사용자 설정, MCP 서버, skill을 읽지 않는 `claude -p` 호출이다. 사용자 설정의 추론 단계도 따르지 않아서 검토자의 추론 단계는 `[review] effort`로 정한다. 호출마다 횟수와 비용이 그 상태의 검토 기록에 쌓이고 `diagnose`의 검토 호출 표에 나온다. 검토자는 지적마다 앞에 [결함]이나 [형식]을 붙인다. [결함]은 고치지 않으면 실행 결과, 판정, 비교가 틀려지는 지적이고, [형식]은 기록 형식, 문구, 출처 표기에 관한 지적이다. 두 표시의 수는 검토 기록의 defects와 formats에 쌓여 부품 성적에 나온다. 형식 지적만 남은 FAIL도 막는다.
+검토자는 사용자 설정, MCP 서버, skill을 읽지 않는 `claude -p` 호출이다. 사용자 설정의 추론 단계도 따르지 않아서 검토자의 추론 단계는 `[review] effort`로 정한다. 호출마다 횟수와 비용이 그 상태의 검토 기록에 쌓이고 `diagnose`의 검토 호출 표에 나온다. 검토자는 지적마다 앞에 [결함]이나 [형식]을 붙인다. [결함]은 고치지 않으면 실행 결과, 판정, 비교가 틀려지는 지적이고, [형식]은 기록 형식, 문구, 출처 표기에 관한 지적이다. 두 표시의 수는 검토 기록의 defects와 formats에 쌓여 부품 성적에 나온다. 형식 지적만 남은 FAIL도 기본으로는 막고, `[review] formats_block = false`면 넘기면서 그 지적을 출력한다.
 
 review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{context}`를 쓸 수 있다. `{diff}`는 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀐다. 처음에는 계획을 시작한 뒤의 diff 전체를 주고, 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 준다. 통과한 뒤 코드가 그대로면 다시 부르지 않고, 계획 내용이 바뀌면 diff 전체를 다시 본다.
 

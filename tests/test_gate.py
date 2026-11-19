@@ -859,6 +859,31 @@ class MlTest(Repo):
         self.assertEqual((rev["IMPLEMENT"]["exempt"], rev["IMPLEMENT"]["pass"]), ("예(로컬 1분, 서버 없음)", True))
         self.assertIn("'가벼운 실행'이 '예'인데", self.prompts()[0])  # 그 주장이 맞는지는 PLAN 검토자가 본다
 
+    def stage2(self, line):
+        """2단계 정의에 한 줄을 더하고 커밋한다"""
+        self.edit(".gate/config.toml", ('n = 2\nname = "결합"\n', f'n = 2\nname = "결합"\n{line}\n'))
+        self.commit("harness: 단계 검사", ".gate/config.toml")
+
+    def test_단계의_exit_검사가_모두_통과하면_단계_전환_검토를_띄운다(self):
+        self.stage2('exit = [{check = "recent_closed", n = 1, kind = "tune", states = ["ABANDONED"], '
+                    'item = "결정: 고른 갈래", pattern = "기각"}]')
+        self.gate("start", "--kind", "tune", "--title", "a")
+        self.edit(self.PLAN, ("- 고른 갈래:", "- 고른 갈래: 기각"))
+        self.assertNotIn("[단계 전환 검토]", self.gate("start", "--kind", "tune", "--title", "b").stdout)
+        self.gate("abandon", "P001", "--why", "w")
+        self.assertIn("[단계 전환 검토] 2단계(결합)", self.gate("start", "--kind", "tune", "--title", "c").stdout)
+        self.edit(self.PLAN, ("- 고른 갈래: 기각", "- 고른 갈래: 채택"))
+        self.assertNotIn("[단계 전환 검토]", self.gate("start", "--kind", "tune", "--title", "d").stdout)
+
+    def test_단계의_require_검사를_채우지_못하면_새_계획을_막고_계획을_읽는_검사는_lint가_막는다(self):
+        self.stage2('require = [{check = "field", path = "docs/a.md", field = "재현 확인"}]')
+        r = self.gate("start", "--kind", "tune", "--title", "t")
+        self.assertIn("2단계의 시작 조건(require)을 채우지 못해 새 계획을 막았다", r.stderr)
+        self.write("docs/a.md", "---\n재현 확인: 예\n---\n")
+        self.assertIn("P001 t: PLAN", self.gate("start", "--kind", "tune", "--title", "t").stdout)
+        self.edit(".gate/config.toml", ('require = [{check = "field"', 'require = [{check = "filled", section = "x"}, {check = "field"'))
+        self.assertIn("2단계 require: 'filled'는 계획 파일을 읽는 검사라 단계 검사에 쓸 수 없다", self.gate("lint").stdout)
+
     def test_부모가_가벼운_실행으로_건너뛴_코드는_이어진_계획의_검토에_넘긴다(self):
         self.to_implement("예(로컬 1분, 서버 없음)")
         self.implement("x = 7\n")
@@ -1099,6 +1124,20 @@ class FeatureTest(Repo):
         out = self.gate("diagnose").stdout.split("## 부품 성적")[1]
         self.assertIn("| 검토 비용(USD) | 결함 지적 | 형식 지적 |", out)
         self.assertRegex(out, r"\| feature \|[^\n]* \| 1 \| 3 \|\n")
+
+    def test_formats_block을_끄면_형식_지적만_남은_FAIL은_넘기고_결함이_있으면_막는다(self):
+        self.edit(".gate/config.toml", ("[review]\n", "[review]\nformats_block = false\n"))
+        self.commit("harness: 형식 지적", ".gate/config.toml")
+        self.gate("start", "--kind", "feature", "--title", "f")
+        self.edit("plans/P001.md", ("## 요구사항\n", "## 요구사항\n\nok를 둔다.\n"),
+                  ("| 기준 | 확인 방법 |\n|---|---|", "| 기준 | 확인 방법 |\n|---|---|\n| ok가 있다 | 새 테스트 |"),
+                  ("## 범위 밖\n", "## 범위 밖\n\n없음\n"))
+        self.reviewer_says(False, ["[결함] 기준이 모호하다", "[형식] 출처 표기가 없다"])
+        self.assertIn("검토: [결함] 기준이 모호하다", self.gate("next", "P001", "--review").stdout)
+        self.reviewer_says(False, ["[형식] 출처 표기가 없다"])
+        out = self.gate("next", "P001", "--review").stdout
+        self.assertIn("SPEC 검토에 형식 지적만 남아 넘겼다: [형식] 출처 표기가 없다", out)
+        self.assertIn("P001 f: PLAN", out)
 
     def test_수용_기준마다_테스트_결과가_있어야_하고_막힌_이유가_진단에_남는다(self):
         self.feature_to_test()

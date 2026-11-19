@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import evolve, records, score
-from .checks import run_checks
+from .checks import run_checks, stage_checks, stage_due
 from .core import (CFG, CLOSED, ENGINE, P, PLANS, ROOT, Lock, bullets, cfg_for, cond_holds, git, head, is_code_any,
                    is_harness, is_test, kind_states,
                    load, log_event, next_state, now, parse_config, plan_files, plan_text, result_paths, save, sections, snapshot,
@@ -79,6 +79,9 @@ def cmd_start(a, flow):
     allowed = stage_kinds(flow)
     if allowed is not None and a.kind not in allowed and not kinds[a.kind].get("any_stage"):
         sys.exit(f"{flow['stage']}단계에서는 {a.kind}를 시작할 수 없다(허용: {', '.join(sorted(allowed))})")
+    need = [] if kinds[a.kind].get("any_stage") else stage_checks(flow, "require")
+    if need:
+        sys.exit(f"{flow['stage']}단계의 시작 조건(require)을 채우지 못해 새 계획을 막았다: " + "; ".join(need))
     opts = [x for x in (a.with_ or "").replace(",", " ").split() if x]
     bad = [x for x in opts if x not in kinds[a.kind].get("options", [])]
     if bad:
@@ -106,6 +109,8 @@ def cmd_start(a, flow):
     flow["plans"][pid] = p
     save(flow)
     show_todo(pid, p)
+    if stage_due(flow):
+        print(stage_due(flow))
 
 
 def cmd_next(a, flow):
@@ -275,7 +280,7 @@ def cmd_stage(a, flow):
             sys.exit(f"{P['decisions_file']}에 제목이 정확히 '{title}'인 항목이 없다. 사용자와 정한 결정을 먼저 쓴다")
     print(f"{flow.get('stage')}단계 → {a.n}단계")
     flow["stage"] = a.n
-    flow.setdefault("stage_history", []).append([a.n, now(), a.decision])
+    flow.setdefault("stage_history", []).append([a.n, now(), a.decision, time.time()])
     save(flow)
 
 

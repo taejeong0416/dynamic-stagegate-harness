@@ -16,7 +16,7 @@ from datetime import datetime
 
 from . import parts as PT
 from . import records, score
-from .checks import CHECKS, applies, call_reviewer, load_part_checks
+from .checks import BUILTIN, CHECKS, STAGE_CHECKS, applies, call_reviewer, load_part_checks
 from .core import (CFG, CLOSED, GATE_DIR, ROOT, body, bullets, cfg_for, changed_since, git, head, is_code, now,
                    parse_config, read_events, sections, tables, template_text)
 
@@ -164,6 +164,14 @@ def lint(cfg):
         for k in st.get("kinds", []):
             if k not in cfg["kinds"]:
                 bad.append(f"{st.get('n')}단계의 종류 {k}가 [kinds]에 없다")
+        for key in ("exit", "require"):
+            for spec in st.get(key, []):
+                c = spec.get("check")
+                if c not in CHECKS:
+                    bad.append(f"{st.get('n')}단계 {key}: 검사 '{c}'가 없다")
+                elif c in BUILTIN and c not in STAGE_CHECKS:
+                    bad.append(f"{st.get('n')}단계 {key}: '{c}'는 계획 파일을 읽는 검사라 단계 검사에 쓸 수 없다"
+                               f"(쓸 수 있는 기본 검사: {', '.join(sorted(STAGE_CHECKS))}, 부품 checks.py의 검사)")
     for g in cfg.get("guard", []):
         try:
             re.compile(g.get("pattern", "("))
@@ -708,6 +716,10 @@ def weakened_settings(old, new):
         added = sorted(set(st.get("kinds", [])) - ostages.get(st["n"], set(st.get("kinds", []))))
         if added:
             out.append(f"[[stages]] {st['n']}단계: 허용 종류 {', '.join(added)}가 늘어난다")
+        gone = [x for x in next((o.get("require", []) for o in old.get("stages", []) if o["n"] == st["n"]), [])
+                if x not in st.get("require", [])]
+        if gone:
+            out.append(f"[[stages]] {st['n']}단계: 시작 조건(require) {', '.join(x.get('check', '?') for x in gone)}가 빠지거나 바뀐다")
     return out
 
 

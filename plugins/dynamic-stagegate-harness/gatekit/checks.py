@@ -384,6 +384,41 @@ def field(ctx, spec):
 
 
 @check
+def recent_closed(ctx, spec):
+    """이번 프로젝트 단계에서 닫힌 계획 가운데 최근 n개(기본 1)가 모두 조건에 맞는다. kind를 주면 그 종류만 세고, states(기본
+    DONE)에 든 상태로 닫힌 계획만 센다. item("절: 항목")과 pattern(정규식)을 주면 그 항목 값이 pattern에 맞아야 한다"""
+    from .records import all_plans, closed_at
+    n, kind, states = spec.get("n", 1), spec.get("kind"), spec.get("states", ["DONE"])
+    since = next((h[3] for h in reversed(ctx["flow"].get("stage_history", [])) if len(h) > 3), 0)
+    done = sorted((p for p in all_plans(ctx["flow"]).values() if p["state"] in states and (not kind or p["kind"] == kind)
+                   and closed_at(p) >= since), key=closed_at)[-n:]
+    what = f"{kind} 계획" if kind else "계획"
+    if len(done) < n:
+        return [f"이번 단계에서 {'/'.join(states)}로 닫힌 {what}이 {len(done)}개다({n}개 필요)"]
+    if not spec.get("item"):
+        return []
+    name, item = spec["item"].split(": ", 1)
+    bad = [p["plan"] for p in done if not re.search(spec["pattern"], bullets(sections(plan_text(p)).get(name, [])).get(item, ""))]
+    return [f"최근 닫힌 {what} {n}개 가운데 '{spec['item']}'이 '{spec['pattern']}'에 맞지 않는 계획: {', '.join(bad)}"] if bad else []
+
+
+def stage_checks(flow, key):
+    """지금 프로젝트 단계의 key("exit"나 "require") 검사에서 빠진 것. 계획 없이 도는 검사만 쓴다"""
+    st = next((x for x in CFG["stages"] if x["n"] == flow.get("stage")), {})
+    ctx = {"flow": flow, "cfg": CFG, "pid": "", "p": {}, "s": {}, "text": "", "state": ""}
+    return [m for spec in st.get(key, []) for m in CHECKS[spec["check"]](ctx, spec)]
+
+
+def stage_due(flow):
+    """지금 단계에 exit 검사가 있고 모두 통과하면 단계 전환 검토를 권하는 문장"""
+    st = next((x for x in CFG["stages"] if x["n"] == flow.get("stage")), {})
+    if not st.get("exit") or stage_checks(flow, "exit"):
+        return ""
+    return (f"[단계 전환 검토] {st['n']}단계({st.get('name', '')})의 넘어가는 조건(exit)을 모두 채웠다. 다음 단계로 넘어갈지 "
+            "권장안과 함께 사용자에게 한 번 묻고, 넘어가기로 하면 결정 문서에 쓴 뒤 gate stage로 바꾼다.")
+
+
+@check
 def survey(ctx, spec):
     """정리 전의 문서 크기, 항목 ID, 풀리는 참조를 계획 기록에 남긴다. kept 검사가 정리 뒤와 견준다"""
     from .records import survey as measure
@@ -588,6 +623,10 @@ def review_check(ctx, st):
     result, meta = call_reviewer(prompt, model, ctx["cfg"])
     calls, spent = (rev or {}).get("calls", 1 if rev else 0), (rev or {}).get("spent", (rev or {}).get("cost") or 0)
     tags = {k: (rev or {}).get(k, 0) + sum(m.lstrip().startswith(t) for m in result["missing"]) for k, t in TAGS.items()}
+    if (not result["pass"] and result["missing"] and ctx["cfg"]["review"].get("formats_block", True) is False
+            and all(m.lstrip().startswith(TAGS["formats"]) for m in result["missing"])):
+        result = {"pass": True, "missing": result["missing"]}  # [review] formats_block = false면 형식 지적만으로는 막지 않는다
+        ctx.setdefault("notes", []).append(f"{state} 검토에 형식 지적만 남아 넘겼다: " + " / ".join(result["missing"]))
     p.setdefault("review", {})[state] = {"pass": bool(result["pass"]), "hash": plan_hash(text, ctx["cfg"]),
                                          "missing": result["missing"], "at": now(), **meta, "calls": calls + 1,
                                          "spent": round(spent + (meta.get("cost") or 0), 6), **tags}
@@ -631,4 +670,6 @@ def load_part_checks(folder=None):
         mod.loader.exec_module(importlib.util.module_from_spec(mod))
 
 
+BUILTIN = set(CHECKS)
+STAGE_CHECKS = {"field", "doc_size", "recent_closed"}  # 계획 없이 도는 기본 검사. 부품 checks.py의 검사도 [[stages]]에 쓸 수 있다
 load_part_checks()
