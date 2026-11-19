@@ -1,6 +1,6 @@
 ---
 name: setup
-description: 프로젝트에 stagegate state machine 하네스를 설치한다. 고정 질문의 답과 저장소의 사실로 부품을 골라 구조를 조립하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 조정을 정한다. 엔진 갱신(update)도 한다. 사용자가 "stagegate 하네스 설치", "setup", "하네스 깔아줘", "하네스 갱신"이라고 할 때 쓴다.
+description: 프로젝트에 stagegate state machine 하네스를 설치한다. 고정 질문의 답과 저장소의 사실로 부품을 골라 구조를 조립하고, 목적을 묻는 인터뷰로 PROFILE.md와 첫 조정을 정한다. 엔진 갱신(update)도 하고, statusline에 계획 상태를 띄울지도 묻는다. 사용자가 "stagegate 하네스 설치", "setup", "하네스 깔아줘", "하네스 갱신"이라고 할 때 쓴다.
 argument-hint: "[update]"
 ---
 
@@ -71,6 +71,21 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 2. 조립된 구조와 PROFILE이 맞지 않는 곳을 찾는다. 바꿀 곳이 없으면 PROFILE만 커밋하고 끝낸다.
 3. 바꿀 곳이 있으면 evolve skill의 제안서 절차로 H001을 쓴다. 근거 칸에는 PROFILE의 해당 절을 인용한다. `propose H001`, `check-proposal H001 --review`, `adopt` 순서로 적용한다(approval이 user이면 adopt 전에 사용자 승인을 받는다).
 
+## 5. statusline
+
+statusline은 프로젝트가 아니라 사용자 설정 `~/.claude/settings.json`에 켜는 선택 기능이고, CLAUDE_CONFIG_DIR가 있으면 그 폴더의 설정에 켠다. 켜면 하네스가 있는 프로젝트에서 진행 중인 계획마다 번호, 종류, 상태 경로, 예상 종료 시각이 한 줄씩 statusline에 나온다.
+
+1. 켜져 있는지 본다.
+   ```
+   python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/statusline.py" --check
+   ```
+2. "켜짐"이면 묻지 않고 넘어가고, "꺼짐"이면 사용자에게 statusline에 계획 상태를 띄울지 묻는다. 지금 쓰는 statusLine이 출력에 나오면 그 명령은 지우지 않고 그 명령의 출력 아래에 계획 줄을 붙인다고 함께 알린다.
+3. 원한다고 답하면 켠다. 출력을 그대로 보여 주고, 새 세션부터 보인다고 알린다.
+   ```
+   python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/statusline.py" --install
+   ```
+4. 끄려면 `--uninstall`을 쓴다. statusLine이 켜기 전 명령으로 돌아간다.
+
 ## 갱신(update)
 
 플러그인을 새 버전으로 받은 뒤 프로젝트의 엔진과 라이브러리 복사본을 바꾼다. 쓰는 부품(`.gate/parts`), local.toml, config.toml, PROFILE.md는 건드리지 않는다.
@@ -79,4 +94,4 @@ grilling 방식으로 묻는다. 질문은 한 번에 하나씩 하고, 질문�
 python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" --update --target "<프로젝트 루트>"
 ```
 
-출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .gate/gate.py lint`가 통과하는지 본다. `python -X utf8 .gate/gate.py parts`에 "라이브러리에 v2가 있다"처럼 새 버전이 나온 부품은 사용자에게 알리고, 받으려면 evolve skill의 제안서로 그 부품 폴더를 라이브러리 것으로 바꾼다. 진행 중인 계획이 있으면 update가 경고를 출력한다. 그 계획은 구조 버전은 그대로 쓰지만 바뀐 엔진의 검사를 받으므로 사용자에게 알린다.
+출력된 명령으로 하네스 커밋을 남기고, `python -X utf8 .gate/gate.py lint`가 통과하는지 본다. `python -X utf8 .gate/gate.py parts`에 "라이브러리에 v2가 있다"처럼 새 버전이 나온 부품은 사용자에게 알리고, 받으려면 evolve skill의 제안서로 그 부품 폴더를 라이브러리 것으로 바꾼다. 진행 중인 계획이 있으면 update가 경고를 출력한다. 그 계획은 구조 버전은 그대로 쓰지만 바뀐 엔진의 검사를 받으므로 사용자에게 알린다. `statusline.py --check`로 statusline이 켜져 있는지 보고, 켜져 있으면 `--install`을 다시 돌려 설정 폴더의 사본을 새 버전으로 바꾼다.

@@ -1173,6 +1173,51 @@ class FeatureTest(Repo):
         self.assertIn("실패해야 하는데 종료 코드가 0", r.stdout)
 
 
+class StatuslineTest(Repo):
+    """statusline 켜기와 끄기. 설정 폴더는 CLAUDE_CONFIG_DIR로 임시 폴더를 쓴다"""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = self.root / "cfg"
+        self.cfg.mkdir()
+        self.env = ENV | {"CLAUDE_CONFIG_DIR": str(self.cfg)}
+
+    def statusline(self, *args, script=PLUGIN / "scripts" / "statusline.py", stdin=None):
+        return run([*PY, str(script), *args], self.root, stdin, self.env)
+
+    def settings(self):
+        return json.loads((self.cfg / "settings.json").read_text(encoding="utf-8"))
+
+    def test_켜면_앞_statusline_아래에_계획_줄을_붙이고_끄면_되돌린다(self):
+        self.setup_harness()
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.write("cfg/settings.json", json.dumps({"statusLine": {"type": "command", "command": "echo dash", "padding": 0}}))
+        self.assertIn("꺼짐 (지금 statusLine: echo dash)", self.statusline("--check").stdout)
+        self.assertIn("앞 명령(echo dash)의 출력 아래에", self.statusline("--install").stdout)
+        copy = self.cfg / "stagegate-statusline.py"
+        self.assertEqual(self.settings()["statusLine"], {"type": "command", "padding": 0,
+                                                         "command": f'python -X utf8 "{copy.as_posix()}"'})
+        self.assertTrue((self.cfg / "settings.json.bak").exists())
+        self.assertIn("켜짐 (앞 명령: echo dash)", self.statusline("--check").stdout)
+        out = self.statusline(script=copy, stdin=json.dumps({"workspace": {"project_dir": str(self.root)}})).stdout
+        lines = out.splitlines()
+        self.assertEqual(lines[0].strip(), "dash")
+        self.assertIn("P001 chore", lines[1])
+        self.assertIn("IMPLEMENT", lines[1])
+        out = self.statusline(script=copy, stdin=json.dumps({"cwd": str(self.cfg)})).stdout
+        self.assertEqual([x.strip() for x in out.splitlines()], ["dash"])  # 하네스가 없는 폴더는 앞 명령 출력만
+        self.assertIn("앞 명령(echo dash)으로 되돌렸다", self.statusline("--uninstall").stdout)
+        self.assertEqual(self.settings()["statusLine"], {"type": "command", "command": "echo dash", "padding": 0})
+        self.assertFalse(copy.exists())
+
+    def test_앞_statusline이_없으면_켤_때_새로_적고_끌_때_지운다(self):
+        self.statusline("--install")
+        self.assertIn("stagegate-statusline.py", self.settings()["statusLine"]["command"])
+        self.assertIn("이미 켜져 있다", self.statusline("--install").stdout)
+        self.statusline("--uninstall")
+        self.assertNotIn("statusLine", self.settings())
+
+
 class GuardTest(Repo):
     def setUp(self):
         super().setUp()
