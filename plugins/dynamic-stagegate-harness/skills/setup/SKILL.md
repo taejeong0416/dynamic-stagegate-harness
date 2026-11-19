@@ -24,7 +24,7 @@ argument-hint: "[update]"
 | 산출물을 밖으로 내보내는가(제출, 배포, 릴리스) | ships | yes, no |
 | 테스트 명령이 있는가 | tests | yes, no |
 | 실패하면 무엇을 잃는가 | failure_cost | reversible(되돌릴 수 있음), time(시간 손실), irreversible(되돌릴 수 없음) |
-| 변경마다 문서가 코드와 맞는지 검토받는가 | docs | yes, no. 설계, 결정, 운영 문서를 코드와 함께 고쳐 가는 저장소면 yes를 권한다. solo가 yes면 이 검토가 하나뿐인 검토자이므로 yes를 권한다 |
+| 변경마다 문서가 코드와 맞는지 검토받는가 | docs | yes, no. 설계, 결정, 운영 문서를 코드와 함께 고쳐 가는 저장소면 yes를 권한다. solo가 yes면 이 검토가 하나뿐인 검토이므로 yes를 권한다 |
 
 ## 2. 설치
 
@@ -51,7 +51,7 @@ argument-hint: "[update]"
    python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" --local "<입력 파일>" --dry-run --target "<프로젝트 루트>"
    ```
 3. 목록을 사용자에게 보이고 승인을 받는다. "함께 조립되지 않는다"가 나오면 충돌하는 이름을 그대로 알린다. 실험, 서비스, 에이전트 경로는 지금 한 프로젝트에 하나만 넣을 수 있으므로 주로 하는 일 하나를 고르게 한다.
-4. 엔진 복사본과 상태 파일을 git에서 뺄지 묻는다. 권장 답은 "뺀다"이고, 이유는 엔진을 갱신할 때마다 큰 하네스 커밋이 생기고 `state.json`은 gate 명령마다 바뀌어 상태 파일 커밋이 계속 쌓이기 때문이다. 빼면 저장소를 새로 받은 곳에서는 `setup update`로 엔진을 다시 받아야 하고, 계획 기록은 그 컴퓨터에만 남는다는 것도 함께 알린다. 빼기로 하면 `.gitignore`에 아래 줄을 더한다. 구조 파일(`config.toml`, `history`, `parts`, `local.toml`, `parts.lock`)과 `PROFILE.md`, 제안서는 계속 추적한다.
+4. 엔진 복사본과 상태 파일을 git에서 뺄지 묻는다. 권장 답은 "뺀다"이다. 엔진을 갱신할 때마다 큰 하네스 커밋이 생기고, `state.json`은 gate 명령마다 바뀌어 상태 파일 커밋이 계속 쌓이기 때문이다. 빼면 저장소를 새로 받은 곳에서는 `setup update`로 엔진을 다시 받아야 하고, 계획 기록은 그 컴퓨터에만 남는다는 것도 함께 알린다. 빼기로 하면 `.gitignore`에 아래 줄을 더한다. 구조 파일(`config.toml`, `history`, `parts`, `local.toml`, `parts.lock`)과 `PROFILE.md`, 제안서는 계속 추적한다.
    ```
    # stagegate 엔진 복사본과 상태 파일. 엔진은 플러그인 setup update로 다시 받는다
    /.gate/gatekit/
@@ -61,7 +61,7 @@ argument-hint: "[update]"
    /.gate/state.json
    ```
 5. 승인받으면 `--dry-run`을 빼고 다시 돌린다.
-6. 하네스 파일만 먼저 커밋한다. `git add .gate .githooks`, `git reset .gate/state.json`, `git commit -m "harness: stagegate 하네스 설치"`. 상태 파일을 추적하면 따로 커밋한다. 설치 스크립트가 출력하는 순서를 따른다.
+6. 하네스 파일만 먼저 커밋한다. `git add .gate .githooks`, `git reset .gate/state.json`, `git commit -m "harness: stagegate 하네스 설치"`. 상태 파일을 추적하면 따로 커밋하고, 설치 스크립트가 출력하는 순서를 따른다.
 7. `python -X utf8 .gate/gate.py describe`로 조립된 구조를 보여 준다.
 
 ## 3. 목적 인터뷰
@@ -109,6 +109,6 @@ statusline은 프로젝트가 아니라 사용자 설정 `~/.claude/settings.jso
 python -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/install.py" --update --target "<프로젝트 루트>"
 ```
 
-출력된 명령으로 하네스 커밋을 남기고(엔진 복사본을 추적하지 않으면 커밋할 것이 없다고 나온다), `python -X utf8 .gate/gate.py lint`가 통과하는지 본다. `python -X utf8 .gate/gate.py parts`에 "라이브러리에 v2가 있다"처럼 새 버전이 나온 부품은 사용자에게 알리고, 받으려면 evolve skill의 제안서로 그 부품 폴더를 라이브러리 것으로 바꾼다. 진행 중인 계획이 있으면 update가 경고를 출력한다. 그 계획은 구조 버전은 그대로 쓰지만 바뀐 엔진의 검사를 받으므로 사용자에게 알린다. `statusline.py --check`로 statusline이 켜져 있는지 보고, 켜져 있으면 `--install`을 다시 돌려 설정 폴더의 사본을 새 버전으로 바꾼다.
+출력된 명령으로 하네스 커밋을 남기는데, 엔진 복사본을 추적하지 않으면 커밋할 것이 없다고 나온다. `python -X utf8 .gate/gate.py lint`가 통과하는지도 본다. `python -X utf8 .gate/gate.py parts`에 "라이브러리에 v2가 있다"처럼 새 버전이 나온 부품은 사용자에게 알리고, 받으려면 evolve skill의 제안서로 그 부품 폴더를 라이브러리 것으로 바꾼다. 진행 중인 계획이 있으면 update가 경고를 출력한다. 그 계획은 구조 버전은 그대로 쓰지만 바뀐 엔진의 검사를 받으므로 사용자에게 알린다. `statusline.py --check`로 statusline이 켜져 있는지 보고, 켜져 있으면 `--install`을 다시 돌려 설정 폴더의 사본을 새 버전으로 바꾼다.
 
 엔진 복사본과 상태 파일을 이미 추적하는 프로젝트가 추적을 끊으려면, 설치 절 4번의 줄을 `.gitignore`에 더하고 `git rm -r --cached .gate/gatekit .gate/library .gate/gate.py .gate/GATE.md`를 `harness:` 커밋으로, `git rm --cached .gate/state.json`을 일반 커밋으로 남긴다. guard는 색인에서만 지우는 `git rm --cached`를 막지 않는다.
