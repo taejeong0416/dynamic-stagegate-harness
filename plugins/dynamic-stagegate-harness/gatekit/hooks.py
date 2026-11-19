@@ -8,6 +8,7 @@ session(SessionStart): 진행 중인 계획과 할 일 전체, status_file 절�
   prompt(UserPromptSubmit): 계획마다 한 줄만 넣는다.
   주입 hook은 예외가 나도 통과한다.
 """
+import glob
 import json
 import re
 import sys
@@ -36,6 +37,31 @@ INCIDENT = re.compile(r"\bincident\b[^;&|\n]*?--quote\s+(?:\"([^\"]*)\"|'([^']*)
 ADOPT = re.compile(r"\badopt\s+(\S+)\s+--approved\s+(?:\"([^\"]*)\"|'([^']*)')")
 SHELL_WRITE = re.compile(r"(>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item)"
                          r"[^\n|;&]*?([\w.][\w./-]*\.\w+)")
+# 구조 파일을 쓰거나 옮기거나 지울 수 있는 명령. 인터프리터는 무엇을 쓰는지 알 수 없어 넣는다
+WRITE_CMD = re.compile(r">|\bsed\s+-i|(?<![\w./-])(tee|cp|mv|rm|rmdir|del|ln|touch|truncate|rsync|python3?|py|node|perl|ruby)"
+                       r"(?![\w./-])|Set-Content|Out-File|Add-Content|Copy-Item|Move-Item|Remove-Item|New-Item")
+PATH_ARG = re.compile(r"[\w.*?\[][\w.*?\[\]/-]*")
+
+
+def cmd_paths(cmd, root):
+    """명령에 나온 경로. glob은 저장소에서 펼친 경로도 넣는다"""
+    out = set()
+    for t in PATH_ARG.findall(cmd):
+        t = t.removeprefix("./")
+        out.add(t)
+        if any(c in t for c in "*?["):
+            try:
+                out |= {x.replace("\\", "/") for x in glob.glob(t, root_dir=root, recursive=True)}
+            except (ValueError, OSError):
+                pass
+    return out
+
+
+def protected_path(t):
+    """구조 파일이거나 구조 파일이 든 폴더(.gate/gatekit, .gate)"""
+    from .core import P, is_protected
+    d = t.rstrip("/") + "/"
+    return is_protected(t) or is_protected(d) or any(g.startswith(d) for g in P["protected"])
 
 
 def split_cmd(cmd):
@@ -183,7 +209,8 @@ def guard(inp):
             deny(g["reason"], g.get("part", ""))
     if HOOK_OFF.search(MSG_ARG.sub(r"\1", cmd)):
         deny("git hook이나 Claude Code hook을 끄거나 우회하는 명령은 막는다.")
-    if (STATE_TOUCH.search(cmd) or state_rel in cmd) and not state_safe(cmd, state_rel):
+    paths = cmd_paths(cmd, ROOT)
+    if (STATE_TOUCH.search(cmd) or state_rel in cmd or state_rel in paths) and not state_safe(cmd, state_rel):
         deny("상태는 python -X utf8 .gate/gate.py 명령으로만 바꾼다. 읽기 명령(cat, grep, git log 등)과 이을 수는 있지만 "
              "Python 스크립트, 리다이렉트, 다른 쓰기 명령으로 다루지 않는다.")
     # 승인 방식이 user면 구조 변경은 사용자가 이번 턴에 승인했을 때만(이은 명령 안도 본다). auto는 check-proposal 통과로 충분하다
@@ -201,10 +228,12 @@ def guard(inp):
         if not quote or quote not in prompt:
             deny("incident --quote의 문장이 이번 턴 사용자 입력에 없다. 사용자가 쓴 문장을 그대로 넣고, 결과를 보고 "
                  "스스로 찾은 결함이면 --quote를 뺀다.")
+    hit = next((t for t in sorted(paths) if protected_path(t)), None)
+    if hit and WRITE_CMD.search(cmd) and not state_safe(cmd, state_rel):
+        deny(f"{hit}는 하네스 구조 파일이라 셸로 쓰거나 옮기거나 지우거나 복사하지 않는다. 구조는 제안서와 adopt로 바꾸고, "
+             "엔진(.gate/gatekit)은 플러그인 저장소에서 고쳐 그 저장소의 tests/로 시험한 뒤 setup update로 받는다.")
     flow = load()
     for m in SHELL_WRITE.finditer(cmd):
-        if is_protected(m.group(2)):
-            deny(f"{m.group(2)}는 하네스 구조 파일이라 셸로 쓰지 않는다. 제안서와 adopt로 바꾼다.")
         if is_code_any(m.group(2), flow):
             why = code_gate(m.group(2), flow)
             if why:

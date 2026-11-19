@@ -1233,6 +1233,14 @@ class GuardTest(Repo):
                     "python -X utf8 .gate/gate.py status && python -c \"import json\""):
             self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
 
+    def test_glob으로_가리킨_상태_파일과_엔진_폴더를_다루는_셸_명령을_막는다(self):
+        for cmd in ("python -c \"import json\" .gate/state*.json", "rm .gate/st?te.json", "cp -r .gate/gatekit /tmp/e",
+                    "rm .gate/gatekit/core.py", "python -c \"open('.gate/gatekit/core.py', 'w')\"", "rm -rf .gate",
+                    "cp src/a.py .gate/gatekit/x.py"):
+            self.assertIsNotNone(self.guard("Bash", command=cmd), cmd)
+        for cmd in ("cat .gate/state*.json", "ls .gate/*", "sed -n 1,5p .gate/gatekit/core.py", "python src/core.py"):
+            self.assertIsNone(self.guard("Bash", command=cmd), cmd)
+
     def user_approval(self):
         """승인 방식을 user로 바꾼다(기본은 auto)"""
         self.edit(".gate/config.toml", ("[project]\n", '[project]\napproval = "user"\n'))
