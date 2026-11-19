@@ -4,7 +4,7 @@ version = 1
 origin = "library"
 requires = ["feature"]
 covers = ["logic"]
-applies_when = {answer = {work = "service", tests = "yes"}}
+applies_when = {answer = {work = "service", tests = "yes"}, not = {answer = {solo = "yes"}}}
 
 [states.TESTFIRST]
 code = true

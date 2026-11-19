@@ -1,0 +1,110 @@
+name = "solo"
+description = "혼자 만드는 앱의 작업 경로(work). 계획을 먼저 쓰고, 구현하고, 기록한다"
+version = 1
+origin = "library"
+applies_when = {answer = {work = "service", solo = "yes"}}
+
+[project]
+plans_dir = "plans"
+plan_prefix = "P"
+code = ["src/*", "app/*", "lib/*", "server/*", "client/*", "packages/*", "tests/*", "test/*"]
+tracked = [
+  "src",
+  "app",
+  "lib",
+  "server",
+  "client",
+  "packages",
+  "tests",
+  "test",
+  "plans",
+  "docs",
+  ".gate",
+  ".githooks",
+]
+files_section = "변경 파일"
+unreviewed = ["기록"]
+stop_states = ["RECORD"]
+max_visits = 3
+test = ""
+
+[review]
+tools = "Read,Grep,Glob"
+effort = "high"
+
+[records]
+index = "plans/INDEX.md"
+index_items = ["기록: 바뀐 동작"]
+
+[kinds.work]
+states = ["PLAN", "IMPLEMENT", "RECORD"]
+
+[sections."요구사항"]
+
+[sections."수용 기준"]
+body = """
+| 기준 | 확인 방법 |
+|---|---|
+"""
+
+[sections."범위 밖"]
+
+[sections."변경 파일"]
+body = """
+| 파일 | 바꿀 내용 |
+|---|---|
+"""
+
+[sections."위험"]
+
+[sections."기록"]
+body = """
+- 바뀐 동작:
+- 확인한 곳:
+- 고친 문서:
+- 남은 일:
+"""
+
+[states.PLAN]
+roles = ["plan"]
+sections = ["요구사항", "수용 기준", "범위 밖", "변경 파일", "위험"]
+todo = [
+  "\"요구사항\"에 사용자가 보는 동작을, \"수용 기준\" 표에 기준마다 확인 방법(검사 명령, 화면 확인, 기기 확인)을, \"범위 밖\"에 하지 않을 것을 쓴다. 버그면 요구사항에 증상과 재현 방법을 쓴다.",
+  "\"변경 파일\" 표에 고칠 코드와 고칠 문서를 모두 쓴다.",
+  "\"위험\"에 깨질 수 있는 곳을 쓴다.",
+]
+checks = [
+  {check = "filled", section = "요구사항"},
+  {check = "table", section = "수용 기준"},
+  {check = "filled", section = "범위 밖"},
+  {check = "files_listed"},
+  {check = "table", section = "변경 파일"},
+]
+
+[states.IMPLEMENT]
+roles = ["implement"]
+code = true
+sections = ["변경 파일"]
+todo = [
+  "\"변경 파일\" 표대로 코드와 문서를 고친다. 표에 없는 파일이 필요하면 표에 더한다(pre-commit이 표에 없는 코드 파일을 막는다).",
+  "검사를 먼저 쓸 수 있는 작업은 검사부터 커밋하고 구현을 커밋한다.",
+  "[project] test 명령이 있으면 통과해야 넘어간다. work는 PLAN에서 쓴 요구사항, 수용 기준, 범위 밖을 구현하며 바꾸면 막힌다.",
+]
+checks = [
+  {check = "files_listed"},
+  {check = "clean"},
+  {check = "files_changed", any = true},
+  {check = "unchanged", state = "PLAN", sections = ["요구사항", "수용 기준", "범위 밖"], only = ["work"]},
+  {check = "command", use = "test", optional = true},
+]
+
+[states.RECORD]
+roles = ["record"]
+sections = ["기록"]
+todo = [
+  "\"기록\"에 바뀐 동작, 확인한 곳(검사 출력, 화면, 기기 가운데 어디서 확인했는지), 고친 문서, 남은 일을 쓴다.",
+  "README와 docs에 영향이 있으면 고쳐 커밋한다.",
+]
+checks = [
+  {check = "filled", section = "기록", items = ["바뀐 동작", "확인한 곳", "고친 문서", "남은 일"]},
+]

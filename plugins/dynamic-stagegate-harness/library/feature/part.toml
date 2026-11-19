@@ -2,7 +2,7 @@ name = "feature"
 description = "기능 경로(feature, refactor). 명세, 계획, 구현, 테스트, 기록으로 간다"
 version = 1
 origin = "library"
-applies_when = {answer = {work = "service"}}
+applies_when = {answer = {work = "service"}, not = {answer = {solo = "yes"}}}
 
 [project]
 plans_dir = "plans"

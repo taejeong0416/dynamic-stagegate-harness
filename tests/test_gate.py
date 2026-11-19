@@ -22,6 +22,7 @@ ANSWERS = {
     "ml": {"work": "experiment", "run": "remote", "ships": "yes", "failure_cost": "time"},
     "service": {"work": "service", "tests": "yes"},
     "agent": {"work": "agent"},
+    "solo": {"work": "service", "tests": "yes", "solo": "yes", "docs": "yes"},
 }
 # 검토자 대신 쓰는 claude. 받은 지시문과 옵션을 남기고 PASS를 돌려준다. 결과 파일이 있으면 그 내용을 돌려준다
 FAKE_CLAUDE = '''import json, os, sys
@@ -185,7 +186,7 @@ class InstallTest(Repo):
         self.edit(".gate/local.toml", ('work = "service"', 'work = "agent"\ntests = "yes"'))
         out = self.gate("parts").stdout
         self.assertIn("- feature v1 (library): 기능 경로(feature, refactor). 명세, 계획, 구현, 테스트, 기록으로 간다 "
-                      "[조건이 거짓이 됐다(답 work = service). 제거 제안서를 검토한다]", out)
+                      "[조건이 거짓이 됐다(답 work = service, 아님(답 solo = yes)). 제거 제안서를 검토한다]", out)
         self.assertIn("(조건: 답 work = agent) [조건이 맞는다. 추가 제안서를 검토한다]", out)
 
     def test_update는_config를_그대로_둔다(self):
@@ -1292,6 +1293,35 @@ class FeatureTest(Repo):
         self.gate("next", "P001", "--review")
         r = self.gate("next", "P001")  # 테스트가 바뀌어 실패를 다시 확인해야 한다
         self.assertIn("실패해야 하는데 종료 코드가 0", r.stdout)
+
+
+class SoloTest(Repo):
+    def test_혼자_만드는_앱은_검토_없이_계획을_넘기고_구현하며_계획을_바꾸면_막고_끝에_문서를_검토한다(self):
+        r = self.install("solo")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.git("add", ".gate", ".githooks")
+        self.git("reset", "-q", ".gate/state.json")
+        self.git("commit", "-qm", "harness: install")
+        self.fake_reviewer()
+        self.gate("start", "--kind", "work", "--title", "w")
+        self.edit("plans/P001.md", ("## 요구사항\n", "## 요구사항\n\nok를 둔다.\n"),
+                  ("| 기준 | 확인 방법 |\n|---|---|", "| 기준 | 확인 방법 |\n|---|---|\n| ok가 있다 | grep |"),
+                  ("## 범위 밖\n", "## 범위 밖\n\n없음\n"),
+                  ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | ok를 더함 |"))
+        self.assertIn("P001 w: IMPLEMENT", self.gate("next", "P001").stdout)
+        self.assertEqual(self.calls(), [])  # 계획은 검토자 없이 절 검사만 받는다
+        self.write("src/a.py", "ok = 1\n")
+        self.git("add", "src", "plans")
+        self.assertEqual(self.git("commit", "-qm", "feat: ok").returncode, 0)
+        self.edit("plans/P001.md", ("ok를 둔다.", "ok와 no를 둔다."))
+        self.assertIn("PLAN를 넘긴 뒤 '요구사항'이 바뀌었다", self.gate("next", "P001").stdout)
+        self.edit("plans/P001.md", ("ok와 no를 둔다.", "ok를 둔다."))
+        self.assertIn("P001 w: RECORD", self.gate("next", "P001").stdout)
+        self.edit("plans/P001.md", ("- 바뀐 동작:", "- 바뀐 동작: ok"), ("- 확인한 곳:", "- 확인한 곳: grep 출력"),
+                  ("- 고친 문서:", "- 고친 문서: 없음"), ("- 남은 일:", "- 남은 일: 없음"))
+        self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+        self.assertIn("모든 상태를 지났다", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("문서 정합성", "".join(self.prompts()) + (self.root / ".gate" / "config.toml").read_text(encoding="utf-8"))
 
 
 class DocReviewTest(Repo):

@@ -2,7 +2,7 @@ name = "bugfix"
 description = "결함 경로(bugfix). 재현, 수정, 확인으로 간다"
 version = 1
 origin = "library"
-applies_when = {any = [{answer = {work = "service"}}, {answer = {work = "agent"}}]}
+applies_when = {any = [{answer = {work = "service"}}, {answer = {work = "agent"}}], not = {answer = {work = "service", solo = "yes"}}}
 
 [project]
 unreviewed = ["테스트 수정", "원인", "검증"]

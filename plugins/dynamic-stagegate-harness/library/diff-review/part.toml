@@ -3,7 +3,7 @@ description = "확인 상태 뒤에 코드 diff 검토 상태를 넣는다"
 version = 1
 origin = "library"
 covers = ["logic"]
-applies_when = {answer = {work = "service"}}
+applies_when = {answer = {work = "service"}, not = {answer = {solo = "yes"}}}
 
 [states.REVIEW]
 todo = [

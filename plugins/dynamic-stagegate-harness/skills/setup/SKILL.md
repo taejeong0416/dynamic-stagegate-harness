@@ -19,11 +19,12 @@ argument-hint: "[update]"
 | 질문 | 키 | 답 |
 |---|---|---|
 | 이 저장소에서 하는 일 | work | experiment(지표로 비교하는 실험), service(서비스나 라이브러리 코드), agent(에이전트, 프롬프트) |
+| 혼자 만드는 앱인가(work가 service일 때만 묻는다) | solo | yes, no. yes면 feature, bugfix, test-first, diff-review 대신 solo 부품의 work(PLAN, IMPLEMENT, RECORD)와 chore만 쓴다. 계획은 검토자 없이 절 검사만 받고, IMPLEMENT를 넘길 때 테스트 명령과 계획에서 쓴 요구사항, 수용 기준, 범위 밖이 그대로인지 본다. 혼자 만드는 작은 앱 저장소면 yes를 권한다 |
 | 오래 걸리는 실행을 어디서 돌리는가 | run | local, remote |
 | 산출물을 밖으로 내보내는가(제출, 배포, 릴리스) | ships | yes, no |
 | 테스트 명령이 있는가 | tests | yes, no |
 | 실패하면 무엇을 잃는가 | failure_cost | reversible(되돌릴 수 있음), time(시간 손실), irreversible(되돌릴 수 없음) |
-| 변경마다 문서가 코드와 맞는지 검토받는가 | docs | yes, no. 설계, 결정, 운영 문서를 코드와 함께 고쳐 가는 저장소면 yes를 권한다 |
+| 변경마다 문서가 코드와 맞는지 검토받는가 | docs | yes, no. 설계, 결정, 운영 문서를 코드와 함께 고쳐 가는 저장소면 yes를 권한다. solo가 yes면 이 검토가 하나뿐인 검토자이므로 yes를 권한다 |
 
 ## 2. 설치
 

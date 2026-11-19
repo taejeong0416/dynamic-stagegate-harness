@@ -76,7 +76,7 @@ Python 3.11 이상과 git이 필요하다.
    ```
    /dynamic-stagegate-harness:setup
    ```
-4. 고정 질문 다섯 개(하는 일, 실행 위치, 산출물, 테스트 명령, 실패 비용)에 답한다. 답과 저장소의 사실에 조건이 맞는 부품이 조립되어 첫 구조가 된다.
+4. 고정 질문(하는 일, 혼자 만드는 앱인지, 실행 위치, 산출물, 테스트 명령, 실패 비용, 문서 정합성 검토 여부)에 답한다. 답과 저장소의 사실에 조건이 맞는 부품이 조립되어 첫 구조가 된다.
 5. 이어지는 목적 인터뷰에 답한다. 답은 `.gate/PROFILE.md`에 남고 첫 구조 조정에 쓰인다.
 6. statusline에 계획 상태를 띄울지 고른다. 띄우면 사용자 설정의 statusLine이 바뀌고, 이미 쓰던 statusLine이 있으면 그 출력 아래에 계획 줄이 붙는다.
 
@@ -129,10 +129,11 @@ Python 3.11 이상과 git이 필요하다.
 | sample-run | 긴 실행 전에 작은 표본으로 끝까지 돌려 보게 한다 | 실패하면 시간을 잃는다 |
 | experiment-diff-review | 실험 코드 diff를 계획과 견주는 검토 | 하는 일이 실험 |
 | cleanup | 기록 정리 경로 tidy(SURVEY, TIDY, CONFIRM) | 하는 일이 실험 |
-| feature | 기능 경로. feature(SPEC, PLAN, IMPLEMENT, TEST, RECORD)와 refactor | 하는 일이 서비스 코드 |
-| test-first | 구현 앞에 TESTFIRST를 넣어 실패하는 테스트를 먼저 쓰고 고정한다 | 하는 일이 서비스 코드이고 테스트 명령이 있다 |
-| diff-review | 확인 상태 뒤에 코드 diff를 검토하는 REVIEW를 넣는다 | 하는 일이 서비스 코드 |
-| bugfix | 결함 경로 bugfix(REPRO, FIX, VERIFY, RECORD). 재현 명령이 REPRO에서 실패하고 FIX에서 통과해야 한다 | 하는 일이 서비스 코드나 에이전트 |
+| feature | 기능 경로. feature(SPEC, PLAN, IMPLEMENT, TEST, RECORD)와 refactor | 하는 일이 서비스 코드이고 혼자 만드는 앱이 아니다 |
+| test-first | 구현 앞에 TESTFIRST를 넣어 실패하는 테스트를 먼저 쓰고 고정한다 | 하는 일이 서비스 코드이고 테스트 명령이 있으며 혼자 만드는 앱이 아니다 |
+| diff-review | 확인 상태 뒤에 코드 diff를 검토하는 REVIEW를 넣는다 | 하는 일이 서비스 코드이고 혼자 만드는 앱이 아니다 |
+| bugfix | 결함 경로 bugfix(REPRO, FIX, VERIFY, RECORD). 재현 명령이 REPRO에서 실패하고 FIX에서 통과해야 한다 | 하는 일이 서비스 코드나 에이전트이고 혼자 만드는 앱이 아니다 |
+| solo | 혼자 만드는 앱의 경로 work(PLAN, IMPLEMENT, RECORD). 계획은 검토자 없이 절 검사만 받고, IMPLEMENT를 넘길 때 테스트 명령과 계획에서 쓴 요구사항, 수용 기준, 범위 밖이 그대로인지 본다. 기록에 확인한 곳을 쓴다 | 하는 일이 서비스 코드이고 혼자 만드는 앱이다 |
 | chore | 작은 변경 경로 chore(IMPLEMENT, RECORD). 파일 수 상한이 있다 | 하는 일이 서비스 코드나 에이전트 |
 | eval | 에이전트 경로. behavior(SPEC, EVALSET, IMPLEMENT, EVAL, RECORD, REPLAN)와 prompt. eval 케이스를 구현 전에 커밋하고 고정한다 | 하는 일이 에이전트 |
 | doc-review | 기록 상태에 문서 정합성 검토를 둔다. 견줄 문서는 `[review] docs`로 받는다 | 문서 정합성을 검토받는다 |
@@ -141,7 +142,7 @@ Python 3.11 이상과 git이 필요하다.
 
 설치하면 라이브러리 부품 전체가 `.gate/library/`에 같이 들어간다. 폴더 패턴이나 서버 주소처럼 프로젝트마다 다른 값은 `.gate/local.toml`에 두면 조립 결과를 덮어쓴다. `gate parts`는 쓰는 부품 가운데 조건이 거짓이 된 것과 쓰지 않는 부품 가운데 조건이 맞게 된 것을 알린다.
 
-상태와 절의 이름은 구조 전체에서 하나라서, 같은 이름을 다르게 정의하는 부품은 함께 조립되지 않는다. 지금 라이브러리에서는 실험 경로, 기능 경로, 에이전트 경로가 PLAN, IMPLEMENT, RECORD를 서로 다르게 정의해서 한 프로젝트에 둘 이상 넣을 수 없다. 설치 스크립트는 이런 조합을 받으면 충돌하는 이름을 출력하고 멈춘다.
+상태와 절의 이름은 구조 전체에서 하나라서, 같은 이름을 다르게 정의하는 부품은 함께 조립되지 않는다. 지금 라이브러리에서는 실험 경로, 기능 경로, 에이전트 경로, solo 경로가 PLAN, IMPLEMENT, RECORD를 서로 다르게 정의해서 한 프로젝트에 둘 이상 넣을 수 없다. 기능 경로와 solo 경로는 고정 질문 solo의 답으로 하나만 골라진다. 설치 스크립트는 이런 조합을 받으면 충돌하는 이름을 출력하고 멈춘다.
 
 ## 구조 진화
 
