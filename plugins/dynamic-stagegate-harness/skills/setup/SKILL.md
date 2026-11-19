@@ -23,10 +23,11 @@ argument-hint: "[update]"
 | 산출물을 밖으로 내보내는가(제출, 배포, 릴리스) | ships | yes, no |
 | 테스트 명령이 있는가 | tests | yes, no |
 | 실패하면 무엇을 잃는가 | failure_cost | reversible(되돌릴 수 있음), time(시간 손실), irreversible(되돌릴 수 없음) |
+| 변경마다 문서가 코드와 맞는지 검토받는가 | docs | yes, no. 설계, 결정, 운영 문서를 코드와 함께 고쳐 가는 저장소면 yes를 권한다 |
 
 ## 2. 설치
 
-1. 프로젝트 밖 임시 폴더에 입력 파일을 쓴다. `[answers]`에 답을 넣고, 이 프로젝트의 폴더에 맞춘 `[project] code`(고칠 때 코드 상태인 계획이 있어야 하는 파일)와 `tracked`(stop hook이 미커밋 변경을 보는 폴더)를 넣는다. 테스트 명령과 테스트 파일 패턴을 알면 `test`, `affected`, `tests`도 넣는다.
+1. 프로젝트 밖 임시 폴더에 입력 파일을 쓴다. `[answers]`에 답을 넣고, 이 프로젝트의 폴더에 맞춘 `[project] code`(고칠 때 코드 상태인 계획이 있어야 하는 파일)와 `tracked`(stop hook이 미커밋 변경을 보는 폴더)를 넣는다. 테스트 명령과 테스트 파일 패턴을 알면 `test`, `affected`, `tests`도 넣는다. docs가 yes면 검토자가 견줄 문서 목록을 `[review] docs`에 넣는다. CLAUDE.md에 문서 표가 있으면 그 표의 문서를 넣는다.
    ```toml
    [answers]
    work = "service"
@@ -34,11 +35,15 @@ argument-hint: "[update]"
    ships = "yes"
    tests = "yes"
    failure_cost = "reversible"
+   docs = "yes"
 
    [project]
    code = ["src/*", "tests/*"]
    tracked = ["src", "tests", "plans", "docs", ".gate", ".githooks"]
    test = "npm test"
+
+   [review]
+   docs = ["README.md", "CLAUDE.md", "docs/architecture.md", "docs/decisions.md"]
    ```
 2. 고른 부품을 먼저 본다. 조건이 맞은 부품과 뺀 부품이 조건과 함께 나온다.
    ```

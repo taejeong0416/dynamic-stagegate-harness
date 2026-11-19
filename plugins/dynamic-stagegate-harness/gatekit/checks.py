@@ -575,8 +575,8 @@ TAGS = {"defects": "[결함]", "formats": "[형식]"}
 def review_check(ctx, st):
     """검토자 호출. review에 {diff}가 있으면 코드 diff를 파일로 준다. 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐
     코드만 다시 본다. 통과한 뒤 계획을 고쳤으면 통과한 원문과의 diff를 주고 바뀐 곳만 보게 한다. {context}가 있으면
-    상태의 context 파일에서 뽑은 발췌를 준다. 상태의 review_exempt = {section, item} 항목이 "예"로 시작하면 부르지 않고
-    면제를 검토 기록에 남긴다"""
+    상태의 context 파일에서 뽑은 발췌를 준다. {docs}는 [review] docs 목록이고, {diff}와 함께 쓰면 그 문서의 diff도 붙인다.
+    상태의 review_exempt = {section, item} 항목이 "예"로 시작하면 부르지 않고 면제를 검토 기록에 남긴다"""
     p, state, text = ctx["p"], ctx["state"], ctx["text"]
     rev = p.get("review", {}).get(state)
     same = bool(rev) and rev["hash"] == plan_hash(text, ctx["cfg"])
@@ -599,9 +599,13 @@ def review_check(ctx, st):
     model = st.get("review_model") or ctx["cfg"]["review"].get("model")
     if not ctx.get("allow_review"):
         return [f"검토자 호출 1회({model or '기본 모델'}, 약 1분)가 필요하다. next {ctx['pid']} --review로 다시 실행한다"]
-    fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state}
+    docs = ctx["cfg"]["review"].get("docs", [])
+    fields = {"plan": p["plan"], "title": p["title"], "kind": p["kind"], "state": state, "docs": ", ".join(docs)}
     if uses_diff:
         diff = plan_diff(ctx, base)[0] + ("" if base else unreviewed_parent(ctx))
+        if "{docs}" in st["review"] and docs:  # 문서 정합성 검토는 고친 문서도 본다
+            since = base or p["entered"]["_start"]["commit"]
+            diff += f"\n\n# 문서 diff ({since}..HEAD, [review] docs)\n" + git("diff", f"{since}..HEAD", "--", *docs)
         f = git_path(f"gate-review/{ctx['pid']}.diff")
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(diff, encoding="utf-8")

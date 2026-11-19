@@ -39,7 +39,7 @@ COMMAND_USE = ("test", "affected")
 # [review] effort에 쓸 수 있는 claude --effort 값
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # review 지시문에 쓸 수 있는 자리
-REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff", "context"}
+REVIEW_FIELDS = {"plan", "title", "kind", "state", "diff", "context", "docs"}
 
 
 # lint
@@ -151,6 +151,8 @@ def lint(cfg):
                         for x in sorted(fields - REVIEW_FIELDS)]
                 if "context" in fields and not st.get("context"):
                     bad.append(f"{s}: review에 {{context}}를 쓰는데 상태의 context(발췌할 파일 목록)가 비었다")
+                if "docs" in fields and not cfg["review"].get("docs"):
+                    bad.append(f"{s}: review에 {{docs}}를 쓰는데 [review] docs(검토자가 견줄 문서 목록)가 비었다")
             ex = st.get("review_exempt")  # 그 절이 없는 종류에서는 면제가 걸리지 않을 뿐이다
             if ex and ex.get("section") in ts and ex.get("item") not in bullets(ts[ex["section"]]):
                 bad.append(f"{kname}/{s}: review_exempt가 가리키는 항목 '{ex.get('section')}: {ex.get('item')}'이 계획 틀에 없다")

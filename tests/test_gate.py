@@ -262,10 +262,11 @@ class LintTest(Repo):
     def test_review의_자리와_command의_use와_테스트_패턴을_본다(self):
         self.setup_harness()
         text = (self.root / ".gate" / "config.toml").read_text(encoding="utf-8")
-        text = text.replace("{plan}과 계획을", "{plan}과 {nope} 계획을").replace('use = "affected"', 'use = "bogus"')
+        text = text.replace("{plan}과 계획을", "{plan}과 {nope} {docs} 계획을").replace('use = "affected"', 'use = "bogus"')
         self.write("bad.toml", text.replace("\ntests = [", "\ntests_off = [", 1))
         r = self.gate("lint", "--file", "bad.toml")
         self.assertIn("REVIEW: review의 {nope}는 쓸 수 없는 자리다", r.stdout)
+        self.assertIn("REVIEW: review에 {docs}를 쓰는데 [review] docs(검토자가 견줄 문서 목록)가 비었다", r.stdout)
         self.assertIn("chore/IMPLEMENT: command의 use는 test, affected 중 하나다(지금 bogus)", r.stdout)
         self.assertIn("feature/TEST: test_edits를 쓰는데 [project] tests가 비었다", r.stdout)
 
@@ -1291,6 +1292,36 @@ class FeatureTest(Repo):
         self.gate("next", "P001", "--review")
         r = self.gate("next", "P001")  # 테스트가 바뀌어 실패를 다시 확인해야 한다
         self.assertIn("실패해야 하는데 종료 코드가 0", r.stdout)
+
+
+class DocReviewTest(Repo):
+    def test_문서_정합성_검토는_기록_상태에서_변경_diff와_문서_diff와_문서_목록을_받는다(self):
+        r = self.install("service", "--answer", "docs=yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("  doc-review:", r.stdout.split("뺀 부품")[0])
+        self.git("add", ".gate", ".githooks")
+        self.git("reset", "-q", ".gate/state.json")
+        self.git("commit", "-qm", "harness: install")
+        self.git("add", ".gate/state.json")
+        self.git("commit", "-qm", "chore: state")
+        self.fake_reviewer()
+        self.gate("start", "--kind", "chore", "--title", "t")
+        self.edit("plans/P001.md",
+                  ("| 파일 | 바꿀 내용 |\n|---|---|", "| 파일 | 바꿀 내용 |\n|---|---|\n| src/a.py | 새 파일 |"),
+                  ("- 바뀐 동작:", "- 바뀐 동작: a"), ("- 문서 영향:", "- 문서 영향: docs/a.md"), ("- 남은 일:", "- 남은 일: 없음"))
+        self.write("src/a.py", "a = 1\n")
+        self.write("docs/a.md", "a는 1이다\n")
+        self.git("add", "src", "docs", "plans")
+        self.assertEqual(self.git("commit", "-qm", "feat: a").returncode, 0)
+        self.assertIn("P001 t: RECORD", self.gate("next", "P001").stdout)
+        self.assertIn("검토자 호출 1회", self.gate("next", "P001").stdout)
+        self.assertIn("모든 상태를 지났다", self.gate("next", "P001", "--review").stdout)
+        self.assertIn("프로젝트 문서 README.md, CLAUDE.md, docs/ 가운데", self.prompts()[-1])
+        self.assertIn("--model", self.calls()[-1]["args"])
+        diff = (self.root / ".git" / "gate-review" / "P001.diff").read_text(encoding="utf-8")
+        self.assertIn("+a = 1", diff)
+        self.assertIn("# 문서 diff", diff)
+        self.assertIn("+a는 1이다", diff)
 
 
 class StatuslineTest(Repo):

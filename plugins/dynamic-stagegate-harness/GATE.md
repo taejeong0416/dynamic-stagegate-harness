@@ -119,7 +119,7 @@ parts.lock에는 부품마다 버전, 출처, 파일 해시(hash), 라이브러�
 | `[kinds.<종류>]` | states(상태 순서), options(start --with로 켤 수 있는 선택), when(상태별 들를 조건), back(상태별로 돌아갈 수 있는 앞 상태), limit(이 종류로 진행할 수 있는 조건), extra_sections(상태가 쓰지 않아도 틀에 넣을 절) |
 | `[states.<상태>]` | todo, checks, sections(이 상태가 쓰는 절), code(true면 코드 편집과 커밋이 열린다), edit("tests"면 code 파일 가운데 `[project] tests` 패턴에 맞는 파일만 고치고 커밋한다), run(true면 gate run을 받는다), review(검토자 지시문), review_when(검토를 걸 종류), review_model(검토자 모델), context(`{context}` 발췌에 담을 파일 목록), review_exempt(`{section, item}`. 그 bullet 항목이 "예"로 시작하면 검토자를 부르지 않는다) |
 | `[sections."<절>"]` | body(계획 틀에 들어갈 표나 bullet) |
-| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000), formats_block(false면 [형식] 지적만 남은 FAIL은 막지 않고 알리기만 한다. 기본 true) |
+| `[review]` | tools(검토자가 쓰는 도구), model(review_model이 없는 상태의 검토자 모델), effort(검토자 추론 단계. low, medium, high, xhigh, max), timeout(초), cite(`{context}` 발췌에 담을 참조의 정규식 목록. 기본은 계획 번호 꼴), context_full(이 글자 수 이하인 파일은 발췌하지 않고 전문을 담는다. 기본 6000), formats_block(false면 [형식] 지적만 남은 FAIL은 막지 않고 알리기만 한다. 기본 true), docs(`{docs}`에 넣을 문서 경로 목록. 문서 정합성 검토가 견줄 문서다) |
 | `[remote]` | host, port, dir(학습 서버), exec_states(gate run 기록이 없어도 ssh로 저장소 코드를 그 자리에서 돌려도 되는 상태), sample_states와 sample_pattern(그 상태에서는 명령에 sample_pattern에 맞는 표본 경로가 들어간 ssh 실행만 연다. experiment 부품은 IMPLEMENT와 results/P###_sample) |
 | `[[stages]]` | n(단계 번호), name, kinds(그 단계에서 시작할 수 있는 종류), exit(다음 단계로 넘어갈 조건 검사 목록), require(그 단계에서 새 계획을 시작하기 전에 통과해야 하는 검사 목록) |
 
@@ -153,7 +153,7 @@ command 검사의 `use`는 `[project]`의 test나 affected를 가리키고, affe
 
 검토자는 사용자 설정, MCP 서버, skill을 읽지 않는 `claude -p` 호출이다. 사용자 설정의 추론 단계도 따르지 않아서 검토자의 추론 단계는 `[review] effort`로 정한다. 호출마다 횟수와 비용이 그 상태의 검토 기록에 쌓이고 `diagnose`의 검토 호출 표에 나온다. 검토자는 지적마다 앞에 [결함]이나 [형식]을 붙인다. [결함]은 고치지 않으면 실행 결과, 판정, 비교가 틀려지는 지적이고, [형식]은 기록 형식, 문구, 출처 표기에 관한 지적이다. 두 표시의 수는 검토 기록의 defects와 formats에 쌓여 부품 성적에 나온다. 형식 지적만 남은 FAIL도 기본으로는 막고, `[review] formats_block = false`면 넘기면서 그 지적을 출력한다. 같은 상태의 검토가 연달아 FAIL한 수는 검토 기록의 fails에 쌓이고 PASS하면 0이 된다. fails가 `[project] review_fail_cap`(기본 3, 0이면 끈다)에 닿으면 `next`가 구조 점검을 지시한다. 고칠 때마다 더 세밀한 지적이 새로 나오는 검토는 계획보다 검토 지시문이나 검사의 자리가 맞지 않을 가능성이 커서, evolve로 FAIL 기준을 넣거나 세부 확인을 뒤 상태로 옮기게 한다.
 
-review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{context}`를 쓸 수 있다. `{diff}`는 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀐다. 처음에는 계획을 시작한 뒤의 diff 전체를 주고, 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 준다. 통과한 뒤 코드가 그대로면 다시 부르지 않고, 계획 내용이 바뀌면 diff 전체를 다시 본다.
+review 지시문에는 `{plan}`, `{title}`, `{kind}`, `{state}`, `{diff}`, `{context}`, `{docs}`를 쓸 수 있다. `{docs}`는 `[review] docs`의 경로를 쉼표로 이은 글로 바뀌고, `{diff}`와 함께 쓰면 diff 파일 끝에 그 문서들의 diff가 붙는다. doc-review 부품이 기록 상태의 문서 정합성 검토에 쓴다. `{diff}`는 코드 diff를 담아 git 폴더의 gate-review/에 둔 파일의 경로로 바뀐다. 처음에는 계획을 시작한 뒤의 diff 전체를 주고, 같은 계획 내용으로 통과한 뒤에는 그 뒤에 바뀐 코드만 준다. 통과한 뒤 코드가 그대로면 다시 부르지 않고, 계획 내용이 바뀌면 diff 전체를 다시 본다.
 
 `{context}`는 상태의 context에 적은 파일에서 뽑은 발췌 파일의 경로로 바뀐다. context_full자 이하인 파일은 전문을 담고, 넘는 파일은 계획 파일이 인용한 참조(cite 패턴과 계획 번호)가 든 줄, csv의 머리 행, 최근 `[records] context_recent`개 제목과 제목마다 첫 줄만 담는다. ledgers에 든 원장에서 supersedes나 superseded로 대체된 항목은 제목과 대체한 항목만 담는다. 결정 기록이나 실험 기록처럼 계속 커지는 문서를 검토자가 호출마다 통째로 읽지 않고, 기록이 쌓여도 발췌가 인용한 양만큼만 커지게 하기 위해서다. 지시문에는 발췌를 먼저 읽고 더 필요한 내용은 원본을 Grep으로 찾으라고 쓴다.
 

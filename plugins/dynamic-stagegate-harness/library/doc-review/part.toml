@@ -1,0 +1,15 @@
+name = "doc-review"
+description = "기록 상태에서 변경 diff와 프로젝트 문서를 견주는 문서 정합성 검토를 둔다"
+version = 1
+origin = "library"
+applies_when = {answer = {docs = "yes"}}
+
+[review]
+# 검토자가 견줄 문서. 프로젝트의 문서 목록은 local.toml의 [review] docs로 덮어쓴다
+docs = ["README.md", "CLAUDE.md", "docs/"]
+
+[[attach]]
+roles = ["record"]
+todo = ["next P### --review로 문서 정합성 검토를 받는다. 검토자는 변경 diff와 [review] docs의 문서를 견준다."]
+review = "{plan}과 계획을 시작한 뒤의 변경 diff {diff}를 읽는다. diff 파일 끝에 문서의 diff가 함께 있다. 프로젝트 문서 {docs} 가운데 이 변경과 관련된 곳을 읽는다. 다음만 FAIL로 낸다. (1) 이 변경 때문에 사실과 달라진 문서의 문장 (2) 고쳐야 하는데 고치지 않은 문서(코드 구조나 동작이 바뀌었는데 그것을 적은 문서를 고치지 않은 것, 결정이 바뀌었는데 결정을 적은 문서를 고치지 않은 것) (3) 서로 어긋나는 두 문서. 문체, 표현, 문서에 더 적으면 좋을 내용은 FAIL로 내지 않는다."
+review_model = "sonnet"
